@@ -210,10 +210,11 @@ export function TemplatesView() {
                           .replace(/\/w_\d+[^/]*\//, "/");
                         window.open(pdfUrl, "_blank");
                       } else {
-                        window.open(
-                          `${API_URL}/templates/${t.id}/pdf`,
-                          "_blank",
-                        );
+                        const token = localStorage.getItem("token");
+                        const pdfUrl =
+                          `${API_URL}/templates/${t.id}/pdf` +
+                          (token ? `?token=${encodeURIComponent(token)}` : "");
+                        window.open(pdfUrl, "_blank");
                       }
                     }}
                     className="w-full inline-flex items-center justify-center gap-1.5 px-2 py-2 text-xs font-semibold rounded-lg bg-primary/10 text-primary hover:bg-primary/20 transition-colors h-9 min-w-0"

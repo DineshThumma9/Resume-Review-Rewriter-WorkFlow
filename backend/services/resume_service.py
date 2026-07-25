@@ -28,15 +28,26 @@ logger = logging.getLogger(__name__)
 bearer = HTTPBearer(auto_error=False)
 
 
+def _extract_token(request: Request) -> str | None:
+    token = request.cookies.get("access_token")
+    if not token:
+        auth_header = request.headers.get("Authorization")
+        if auth_header and auth_header.startswith("Bearer "):
+            token = auth_header.split(" ")[1]
+    if not token:
+        token = request.query_params.get("token")
+    return token
+
+
 async def get_current_user(
     request: Request,
     db: AsyncSession = Depends(get_session),
 ) -> User:
     """
-    FastAPI dependency that resolves the authenticated user by validating
-    the JWT token from the httpOnly cookie and fetching the user from the database.
+    FastAPI dependency that resolves the authenticated user by checking
+    cookies, Authorization header, or token query param.
     """
-    token = request.cookies.get("access_token")
+    token = _extract_token(request)
     if not token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -57,6 +68,30 @@ async def get_current_user(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
 
     return user
+
+
+async def get_optional_current_user(
+    request: Request,
+    db: AsyncSession = Depends(get_session),
+) -> User | None:
+    """
+    Optional user dependency — returns User if authenticated, else None without raising 401.
+    """
+    token = _extract_token(request)
+    if not token:
+        return None
+    try:
+        user_id = decode_access_token(token)
+        if user_id is None:
+            return None
+        result = await db.execute(select(User).where(User.id == int(user_id)))
+        return result.scalar_one_or_none()
+    except Exception:
+        return None
+
+
+CurrentUser = Annotated[User, Depends(get_current_user)]
+OptionalCurrentUser = Annotated[User | None, Depends(get_optional_current_user)]
 
 
 async def mask_resume(resume_content, mask_details: MaskDetails):
@@ -206,8 +241,7 @@ def mask_latex(latex_code: str, resume_content: dict, mask_details: MaskDetails)
     return latex_code
 
 
-# Convenient shorthand for use in route signatures
-CurrentUser = Annotated[User, Depends(get_current_user)]
+
 
 
 async def autofill_resume_profile(resume_text: str, user: User, db: AsyncSession) -> dict[str, Any]:

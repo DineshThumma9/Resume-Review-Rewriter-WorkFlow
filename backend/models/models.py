@@ -1,8 +1,9 @@
 from datetime import UTC, datetime
 from enum import StrEnum
 
-from sqlalchemy import Column, Text
+from sqlalchemy import Column
 from sqlalchemy import Enum as SAEnum
+from sqlalchemy import Text
 from sqlalchemy.dialects.postgresql import JSON
 from sqlmodel import Field, SQLModel
 
@@ -46,7 +47,9 @@ class Resume(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     user_id: int | None = Field(default=None, foreign_key="users.id")
     label: str
-    template_id: int | None = Field(default=None, foreign_key="templates.id", ondelete="SET NULL")
+    template_id: int | None = Field(
+        default=None, foreign_key="templates.id", ondelete="SET NULL"
+    )
     jd_snippet: str | None = None
     content: dict | None = Field(default=None, sa_column=Column(JSON))
     tex_source: str | None = Field(default=None, sa_column=Column(Text))

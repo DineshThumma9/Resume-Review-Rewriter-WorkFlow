@@ -12,7 +12,7 @@ from schemas.schema import (
 )
 from services.preview import generate_template_preview_task
 from services.renderer import render_resume_template_from_string
-from services.resume_service import CurrentUser
+from services.resume_service import CurrentUser, OptionalCurrentUser
 from services.storage import upload_pdf_to_cloudinary
 from services.workflow import ResumeWorkflowService
 from utils.constants import DUMMY_RESUME_DATA
@@ -93,41 +93,40 @@ async def delete_template(template_id: int, current_user: CurrentUser, db: DB):
 @router.get("/{template_id}/pdf")
 async def get_template_pdf(
     template_id: int,
-    current_user: CurrentUser,
+    current_user: OptionalCurrentUser,
     db: DB,
 ):
     """
     Compiles a template to an actual PDF file, uploads to Cloudinary,
     and returns the PDF stream or redirects to Cloudinary.
     """
-    result = await db.execute(
-        select(Template).where(
-            or_(Template.is_builtin, Template.user_id == current_user.id),
-            Template.id == template_id,
-        )
+    user_id = current_user.id if current_user else None
+    query = select(Template).where(
+        or_(Template.is_builtin, Template.user_id == user_id),
+        Template.id == template_id,
     )
+    result = await db.execute(query)
     template = result.scalar_one_or_none()
     if not template:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Template not found")
 
     # Determine sample data to render: prioritize candidate's latest resume if present
-    res = await db.execute(
-        select(Resume)
-        .where(Resume.user_id == current_user.id)
-        .order_by(Resume.created_at.desc())  # type: ignore
-        .limit(1)
-    )
-    latest_resume = res.scalar_one_or_none()
-    resume_data = (
-        latest_resume.content
+    resume_data = DUMMY_RESUME_DATA
+    if current_user:
+        res = await db.execute(
+            select(Resume)
+            .where(Resume.user_id == current_user.id)
+            .order_by(Resume.created_at.desc())  # type: ignore
+            .limit(1)
+        )
+        latest_resume = res.scalar_one_or_none()
         if (
             latest_resume
             and latest_resume.content
             and isinstance(latest_resume.content, dict)
             and latest_resume.content.get("details")
-        )
-        else DUMMY_RESUME_DATA
-    )
+        ):
+            resume_data = latest_resume.content
     latex_code = render_resume_template_from_string(template.tex_source, resume_data)
 
     workflow_service = ResumeWorkflowService()
