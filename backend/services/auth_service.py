@@ -1,16 +1,18 @@
+import logging
 from collections import defaultdict
-from typing import Dict, List, Tuple
 
 import httpx
 from cryptography.fernet import Fernet
 from fastapi import HTTPException
-from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 
 from core.config import settings
 from models.models import APIKEYS, User
 from utils.constants import _VALIDATION_URLS, STATIC_MODELS
+from utils.http_client import get_http_client
+
+logger = logging.getLogger(__name__)
 
 
 class CryptoService:
@@ -38,13 +40,10 @@ class AuthService:
         )
         api_key = result.scalars().first()
         if not api_key:
-            raise HTTPException(
-                status_code=404, detail=f"API KEY NOT FOUND: {provider}"
-            )
+            raise HTTPException(status_code=404, detail=f"API KEY NOT FOUND: {provider}")
         return self.crypto.decrypt(api_key.encrypted_key)
 
-    async def _validate_api_key(self, provider: str, api_key: str) -> Tuple[bool, str]:
-        from utils.http_client import get_http_client
+    async def _validate_api_key(self, provider: str, api_key: str) -> tuple[bool, str]:
 
         url = _VALIDATION_URLS.get(provider)
         if not url:
@@ -60,9 +59,7 @@ class AuthService:
                     headers={"x-api-key": api_key, "anthropic-version": "2023-06-01"},
                 )
             else:
-                r = await client.get(
-                    url, headers={"Authorization": f"Bearer {api_key}"}
-                )
+                r = await client.get(url, headers={"Authorization": f"Bearer {api_key}"})
         except httpx.TimeoutException:
             logger.warning(f"Key validation timeout for {provider} (5s)")
             return True, ""
@@ -105,18 +102,16 @@ class AuthService:
             logger.info(f"Added new key for {provider}")
         await self.db.commit()
 
-    async def get_all_api_keys(self, user: User) -> Dict[str, str]:
-        result = await self.db.execute(
-            select(APIKEYS).where(APIKEYS.user_id == user.id)
-        )
+    async def get_all_api_keys(self, user: User) -> dict[str, str]:
+        result = await self.db.execute(select(APIKEYS).where(APIKEYS.user_id == user.id))
         return {
             entry.provider: self.crypto.decrypt(entry.encrypted_key)
             for entry in result.scalars().all()
         }
 
-    async def get_valid_models(self, user: User) -> Dict[str, List[str]]:
+    async def get_valid_models(self, user: User) -> dict[str, list[str]]:
         """Return available models by fetching them dynamically from provider endpoints."""
-        valid_models: Dict[str, List[str]] = defaultdict(list)
+        valid_models: dict[str, list[str]] = defaultdict(list)
 
         # Check centralized environment keys
         provider_keys = {
@@ -148,9 +143,7 @@ class AuthService:
                         r = await client.get(f"{url}?key={key}")
                         if r.status_code == 200:
                             data = r.json()
-                            models_list = [
-                                m["name"].split("/")[-1] for m in data.get("models", [])
-                            ]
+                            models_list = [m["name"].split("/")[-1] for m in data.get("models", [])]
                             if models_list:
                                 valid_models[provider] = [
                                     m for m in models_list if "gemini" in m.lower()
@@ -168,17 +161,13 @@ class AuthService:
                             data = r.json()
                             models_list = [m["id"] for m in data.get("data", [])]
                             if models_list:
-                                valid_models[provider] = models_list[
-                                    :15
-                                ]  # Cap list size
+                                valid_models[provider] = models_list[:15]  # Cap list size
                             else:
                                 valid_models[provider] = STATIC_MODELS[provider]
                         else:
                             valid_models[provider] = STATIC_MODELS[provider]
                 except Exception as e:
-                    logger.warning(
-                        f"Failed to dynamically fetch models for {provider}: {e}"
-                    )
+                    logger.warning(f"Failed to dynamically fetch models for {provider}: {e}")
                     valid_models[provider] = STATIC_MODELS[provider]
 
         if not valid_models:

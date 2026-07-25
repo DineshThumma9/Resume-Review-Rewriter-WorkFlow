@@ -5,9 +5,10 @@ Schemas directly related to the AI resume workflow: parsing, rewriting, judging.
 """
 
 import re
-from typing import Any, Dict, List, Optional, TypedDict
+from typing import Any, TypedDict
 
 from pydantic import (
+    AliasChoices,
     BaseModel,
     Field,
     field_validator,
@@ -29,11 +30,11 @@ class ResumeAnalysis(BaseModel):
         description="Detailed explanation of how the resume matches the job description",
         default="",
     )
-    missing_keywords: List[str] = Field(
+    missing_keywords: list[str] = Field(
         description="Flat list of simple keyword strings included in job description but missing in resume.",
         default_factory=list,
     )
-    negative_points: List[str] = Field(
+    negative_points: list[str] = Field(
         description=(
             "List of specific weaknesses holding the resume back. "
             "Each item must be a flat, single-level text block. "
@@ -42,7 +43,7 @@ class ResumeAnalysis(BaseModel):
         ),
         default_factory=list,
     )
-    potential_improvements: List[str] = Field(
+    potential_improvements: list[str] = Field(
         description=(
             "List of specific suggestions to improve the resume. "
             "Each item must be a flat, single-level text block. "
@@ -55,11 +56,11 @@ class ResumeAnalysis(BaseModel):
         description="Overall quality of the resume in terms of structure, readability, and ATS-friendliness",
         default="",
     )
-    urgency: Optional[str] = Field(
+    urgency: str | None = Field(
         description="If deadline is mentioned, urgency to submit from current date and time",
         default=None,
     )
-    company_name: Optional[str] = Field(
+    company_name: str | None = Field(
         description="Extract the target company name from the job description if present, otherwise default to 'Company'",
         default="Company",
     )
@@ -78,7 +79,7 @@ class ResumeAnalysis(BaseModel):
                             item.get("action")
                             or item.get("improvement")
                             or item.get("text")
-                            or (list(item.values())[0] if item.values() else "")
+                            or (next(iter(item.values())) if item.values() else "")
                         )
                     else:
                         val = str(item)
@@ -91,15 +92,11 @@ class ResumeAnalysis(BaseModel):
                     ):
                         if not data.get("resume_quality"):
                             # Strip the "resume_quality:" prefix and quotes if any
-                            cleaned_quality = re.sub(
-                                r"^resume_quality:\s*['\"]?\s*", "", val_str
-                            )
+                            cleaned_quality = re.sub(r"^resume_quality:\s*['\"]?\s*", "", val_str)
                             if (
-                                cleaned_quality.startswith("'")
-                                and cleaned_quality.endswith("'")
+                                cleaned_quality.startswith("'") and cleaned_quality.endswith("'")
                             ) or (
-                                cleaned_quality.startswith('"')
-                                and cleaned_quality.endswith('"')
+                                cleaned_quality.startswith('"') and cleaned_quality.endswith('"')
                             ):
                                 cleaned_quality = cleaned_quality[1:-1]
                             data["resume_quality"] = cleaned_quality.strip()
@@ -116,7 +113,7 @@ class ResumeAnalysis(BaseModel):
                             item.get("point")
                             or item.get("issue")
                             or item.get("text")
-                            or (list(item.values())[0] if item.values() else "")
+                            or (next(iter(item.values())) if item.values() else "")
                         )
                     else:
                         val = str(item)
@@ -128,54 +125,48 @@ class ResumeAnalysis(BaseModel):
 class Project(BaseModel):
     """Individual project details"""
 
-    name: Optional[str] = Field(description="Project name/title", default="")
-    description: Optional[str] = Field(
-        description="Brief project description", default=""
-    )
-    date: Optional[str] = Field(
-        description="Date or duration of the project", default=""
-    )
-    link: Optional[str] = Field(description="URL or link to the project", default="")
-    technologies: List[str] = Field(
+    name: str | None = Field(description="Project name/title", default="")
+    description: str | None = Field(description="Brief project description", default="")
+    date: str | None = Field(description="Date or duration of the project", default="")
+    link: str | None = Field(description="URL or link to the project", default="")
+    technologies: list[str] = Field(
         description="Technologies/tools used in the project", default_factory=list
     )
-    highlights: List[str] = Field(
+    highlights: list[str] = Field(
         description="Key achievements or bullet points", default_factory=list
     )
 
 
 class Education(BaseModel):
-    institution: Optional[str] = Field(default="", description="Institution name")
-    location: Optional[str] = Field(
-        default="", description="Location of the institution"
-    )
-    year: Optional[str] = Field(default="", description="Year of education")
-    gpa: Optional[str] = Field(default="", description="GPA of education")
-    course: Optional[str] = Field(default="", description="Course name")
+    institution: str | None = Field(default="", description="Institution name")
+    location: str | None = Field(default="", description="Location of the institution")
+    year: str | None = Field(default="", description="Year of education")
+    gpa: str | None = Field(default="", description="GPA of education")
+    course: str | None = Field(default="", description="Course name")
 
 
 class Experience(BaseModel):
-    company: Optional[str] = Field(default="", description="Company name")
-    location: Optional[str] = Field(default="", description="Location of the company")
-    role: Optional[str] = Field(default="", description="Role/Position held")
-    duration: Optional[str] = Field(default="", description="Duration of employment")
-    responsibilities: List[str] = Field(
+    company: str | None = Field(default="", description="Company name")
+    location: str | None = Field(default="", description="Location of the company")
+    role: str | None = Field(default="", description="Role/Position held")
+    duration: str | None = Field(default="", description="Duration of employment")
+    responsibilities: list[str] = Field(
         description="Key responsibilities and achievements", default_factory=list
     )
 
 
 class Skill(BaseModel):
-    category: Optional[str] = Field(
+    category: str | None = Field(
         default="",
         description="Skill category name (e.g., 'Programming Languages', 'Frameworks', 'Tools')",
     )
-    skills: List[str] = Field(
+    skills: list[str] = Field(
         description="List of specific skills in this category (e.g., ['Python', 'Java', 'C++'])"
     )
 
 
 class ProfileSummary(BaseModel):
-    profile_summary: Optional[str] = Field(
+    profile_summary: str | None = Field(
         default="",
         description=(
             "Professional summary/objective. Rewrite to be ATS-optimized and concise. "
@@ -187,7 +178,7 @@ class ProfileSummary(BaseModel):
 
 class Details(BaseModel):
     name: str = Field(description="Full name of the candidate")
-    profile_links: Dict[str, Optional[str]] = Field(
+    profile_links: dict[str, str | None] = Field(
         description=(
             "Dictionary of ALL links and contact info found in the resume. "
             "Keys should be the platform name (e.g., 'github', 'linkedin', 'phone', 'email', "
@@ -208,8 +199,8 @@ class Details(BaseModel):
         """If LLM left profile_links empty/incomplete, regex-scan any raw text fields to fill gaps."""
         if not isinstance(data, dict):
             return data
-        links: Dict[str, Optional[str]] = data.get("profile_links") or {}
-        normalized_links: Dict[str, Optional[str]] = {}
+        links: dict[str, str | None] = data.get("profile_links") or {}
+        normalized_links: dict[str, str | None] = {}
         for k, v in links.items():
             if not v:
                 continue
@@ -219,8 +210,7 @@ class Details(BaseModel):
                 if m:
                     domain = m.group(1).lower()
                     for ext in (".com", ".org", ".net", ".io"):
-                        if domain.endswith(ext):
-                            domain = domain[: -len(ext)]
+                        domain = domain.removesuffix(ext)
                     normalized_links[domain] = v
                 else:
                     normalized_links[k_lower] = v
@@ -229,58 +219,51 @@ class Details(BaseModel):
         links = normalized_links
         raw_text = " ".join(str(v) for v in data.values() if isinstance(v, str))
 
-        def _first(pattern: str, text: str) -> Optional[str]:
+        def _first(pattern: str, text: str) -> str | None:
             m = re.search(pattern, text, re.IGNORECASE)
             return m.group(0) if m else None
 
         urls = re.findall(r"https?://(?:www\.)?([\w\-\.]+)[/\w\-\.\?\=\&\%]*", raw_text)
         for domain in urls:
             for ext in (".com", ".org", ".net", ".io"):
-                if domain.endswith(ext):
-                    domain = domain[: -len(ext)]
+                domain = domain.removesuffix(ext)
             key = domain.lower()
             if key not in links:
                 match = re.search(
-                    r"https?://(?:www\.)?"
-                    + re.escape(domain)
-                    + r"[a-zA-Z]{0,4}[/\w\-\.\?\=\&\%]*",
+                    r"https?://(?:www\.)?" + re.escape(domain) + r"[a-zA-Z]{0,4}[/\w\-\.\?\=\&\%]*",
                     raw_text,
                 )
                 if match:
                     links[key] = match.group(0)
         if not links.get("phone"):
-            phone = _first(
-                r"(?:\+91[\s\-]?)?[6-9]\d{9}|\+?\d[\d\s\-\.]{8,14}\d", raw_text
-            )
+            phone = _first(r"(?:\+91[\s\-]?)?[6-9]\d{9}|\+?\d[\d\s\-\.]{8,14}\d", raw_text)
             if phone:
                 links["phone"] = phone.strip()
         if not links.get("email"):
-            email = _first(
-                r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}", raw_text
-            )
+            email = _first(r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}", raw_text)
             if email:
                 links["email"] = email
         data["profile_links"] = links
         return data
 
     @property
-    def contact(self) -> Optional[str]:
+    def contact(self) -> str | None:
         return self.profile_links.get("phone") or ""
 
     @contact.setter
-    def contact(self, val: Optional[str]):
+    def contact(self, val: str | None):
         self.profile_links["phone"] = val
 
     @property
-    def email(self) -> Optional[str]:
+    def email(self) -> str | None:
         return self.profile_links.get("email") or ""
 
     @email.setter
-    def email(self, val: Optional[str]):
+    def email(self, val: str | None):
         self.profile_links["email"] = val
 
     @property
-    def other_links(self) -> Dict[str, str]:
+    def other_links(self) -> dict[str, str]:
         return {
             k: v
             for k, v in self.profile_links.items()
@@ -288,59 +271,55 @@ class Details(BaseModel):
         }
 
     @property
-    def github(self) -> Optional[str]:
+    def github(self) -> str | None:
         return self.profile_links.get("github") or ""
 
     @github.setter
-    def github(self, val: Optional[str]):
+    def github(self, val: str | None):
         self.profile_links["github"] = val
 
     @property
-    def linkedin(self) -> Optional[str]:
+    def linkedin(self) -> str | None:
         return self.profile_links.get("linkedin") or ""
 
     @linkedin.setter
-    def linkedin(self, val: Optional[str]):
+    def linkedin(self, val: str | None):
         self.profile_links["linkedin"] = val
 
     @property
-    def leetcode(self) -> Optional[str]:
+    def leetcode(self) -> str | None:
         return self.profile_links.get("leetcode") or ""
 
     @leetcode.setter
-    def leetcode(self, val: Optional[str]):
+    def leetcode(self, val: str | None):
         self.profile_links["leetcode"] = val
 
     @property
-    def codechef(self) -> Optional[str]:
+    def codechef(self) -> str | None:
         return self.profile_links.get("codechef") or ""
 
     @codechef.setter
-    def codechef(self, val: Optional[str]):
+    def codechef(self, val: str | None):
         self.profile_links["codechef"] = val
 
     @property
-    def portfolio(self) -> Optional[str]:
-        return (
-            self.profile_links.get("portfolio")
-            or self.profile_links.get("website")
-            or ""
-        )
+    def portfolio(self) -> str | None:
+        return self.profile_links.get("portfolio") or self.profile_links.get("website") or ""
 
     @portfolio.setter
-    def portfolio(self, val: Optional[str]):
+    def portfolio(self, val: str | None):
         self.profile_links["portfolio"] = val
 
     @property
-    def location(self) -> Optional[str]:
+    def location(self) -> str | None:
         return self.profile_links.get("location") or ""
 
     @location.setter
-    def location(self, val: Optional[str]):
+    def location(self, val: str | None):
         self.profile_links["location"] = val
 
     @model_serializer
-    def serialize_model(self) -> Dict[str, Any]:
+    def serialize_model(self) -> dict[str, Any]:
         return {
             "name": self.name,
             "profile_links": self.profile_links,
@@ -358,55 +337,72 @@ class Details(BaseModel):
 class RewriteResume(BaseModel):
     """Structured content for rewritten resume"""
 
-    profile_summary: Optional[ProfileSummary] = Field(
-        description="Professional Summary"
-    )
-    details: Optional[Details] = Field(description="Personal details")
-    education: Optional[List[Education]] = Field(
+    profile_summary: ProfileSummary | None = Field(description="Professional Summary")
+    details: Details | None = Field(description="Personal details")
+    education: list[Education] | None = Field(
         description="List of education entries (must match Education schema precisely)",
         default=None,
     )
-    experience: Optional[List[Experience]] = Field(
+    experience: list[Experience] | None = Field(
         description="List of work experiences (must match Experience schema precisely)",
         default=None,
     )
-    technical_skills: Optional[List[Skill]] = Field(
+    technical_skills: list[Skill] | None = Field(
         description="List of technical skills categorized (e.g., 'Languages: Python, Java')",
         default=None,
     )
-    projects: Optional[List[Project]] = Field(
+    projects: list[Project] | None = Field(
         description="List of projects (must match Project schema precisely)",
         default=None,
     )
-    coursework: Optional[List[str]] = Field(
+    coursework: list[str] | None = Field(
         description="List of relevant coursework or academic projects as strings",
         default=None,
     )
-    achivements: Optional[List[str]] = Field(
+    achievements: list[str] | None = Field(
         description=(
             "Achievements, awards, competitive programming stats, and certifications. Do NOT include open source contributions here — those go in open_source. Do NOT include hackathons — those go in hackathons."
         ),
         default=None,
+        validation_alias=AliasChoices("achievements", "achivements"),
     )
-    open_source: Optional[List[str]] = Field(
+    open_source: list[str] | None = Field(
         description=(
             "Open source contributions ONLY — merged PRs, filed issues, maintainer credits. Each entry is one contribution as a string. Do NOT include hackathons, certificates, or LeetCode stats here."
         ),
         default=None,
     )
-    internships: Optional[List[Experience]] = Field(
+    internships: list[Experience] | None = Field(
         description="List of internships (must match Experience schema precisely)",
         default=None,
     )
-    hackathons: Optional[List[str]] = Field(
+    hackathons: list[str] | None = Field(
         description="List of hackathons participated as strings", default=None
     )
-    certifications: Optional[List[str]] = Field(
+    certifications: list[str] | None = Field(
         description="List of certifications obtained as strings", default=None
     )
-    extracircular_activities: Optional[List[str]] = Field(
-        description="List of extracurricular activities as strings", default=None
+    extracurricular_activities: list[str] | None = Field(
+        description="List of extracurricular activities as strings",
+        default=None,
+        validation_alias=AliasChoices("extracurricular_activities", "extracircular_activities"),
     )
+
+    @property
+    def achivements(self) -> list[str] | None:
+        return self.achievements
+
+    @achivements.setter
+    def achivements(self, value: list[str] | None) -> None:
+        self.achievements = value
+
+    @property
+    def extracircular_activities(self) -> list[str] | None:
+        return self.extracurricular_activities
+
+    @extracircular_activities.setter
+    def extracircular_activities(self, value: list[str] | None) -> None:
+        self.extracurricular_activities = value
 
     @field_validator("profile_summary", mode="before")
     @classmethod
@@ -454,11 +450,12 @@ class RewriteResume(BaseModel):
     @field_validator(
         "open_source",
         "coursework",
-        "achivements",
+        "achievements",
         "hackathons",
         "certifications",
-        "extracircular_activities",
+        "extracurricular_activities",
         mode="before",
+        check_fields=False,
     )
     @classmethod
     def clean_list_of_strings(cls, val: Any) -> Any:
@@ -505,15 +502,13 @@ class RewriteResume(BaseModel):
         if self.open_source and self.achivements:
             os_set = {str(item).lower().strip() for item in self.open_source}
             self.achivements = [
-                ach
-                for ach in self.achivements
-                if str(ach).lower().strip() not in os_set
+                ach for ach in self.achivements if str(ach).lower().strip() not in os_set
             ]
         return self
 
 
 class JudgeResume(BaseModel):
-    request_changes: List[str] = Field(
+    request_changes: list[str] = Field(
         description="If should_rewrite is true, list the specific, actionable changes the rewriter must make. If should_rewrite is false, this must be an empty list."
     )
     should_rewrite: bool = Field(
@@ -546,41 +541,39 @@ class JudgeResume(BaseModel):
 class ResumeState(TypedDict, total=False):
     jd: str
     resume: str
-    page_count: Optional[int]
-    analysis: Optional[Any]
-    changes_content: Optional[Any]
+    page_count: int | None
+    analysis: Any | None
+    changes_content: Any | None
     latex_code: str
     diff_latex_code: str
     tone: str
     model: str
     provider: str
     api_key: str
-    exclude_sections: Dict[str, bool]
+    exclude_sections: dict[str, bool]
     output_path: str
-    judgements: List[Any]
+    judgements: list[Any]
     pdf_base64: str
     diff_pdf_base64: str
     template_source: str
-    template_id: Optional[int]
-    error: Optional[str]
+    template_id: int | None
+    error: str | None
     iteration: int
 
 
 class BulletRewriteOutput(BaseModel):
-    id: str = Field(
-        description="The unique ID matching the input bullet point (e.g. 'exp_0_1')"
-    )
+    id: str = Field(description="The unique ID matching the input bullet point (e.g. 'exp_0_1')")
     rewritten_text: str = Field(
         description="Optimized, ATS-friendly text incorporating keywords naturally"
     )
 
 
 class BatchedRewriteResponse(BaseModel):
-    rewritten_bullets: List[BulletRewriteOutput] = Field(default_factory=list)
-    rewritten_summary: Optional[str] = Field(
+    rewritten_bullets: list[BulletRewriteOutput] = Field(default_factory=list)
+    rewritten_summary: str | None = Field(
         default=None,
         description="Optimized profile summary/objective. Null if summary was not provided in input.",
     )
-    optimized_skills: Optional[List[Skill]] = Field(
+    optimized_skills: list[Skill] | None = Field(
         default=None, description="Optimized skills list. Null if not provided."
     )

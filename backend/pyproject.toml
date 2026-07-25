@@ -37,3 +37,13 @@ dependencies = [
     "uvicorn>=0.49.0",
     "uvloop>=0.22.1",
 ]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "UP", "B"]
+ignore = ["B008", "E501", "B904"]
+
+
+

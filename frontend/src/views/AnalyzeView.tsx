@@ -21,8 +21,15 @@ import { ProgressStream } from "../components/analyze/ProgressStream";
 import Ai from "../components/ai-input";
 
 export function AnalyzeView() {
-  const { latexCode, setResumeState, pdfUrl, diffPdfUrl, resumeId, label } =
-    useResumeStore();
+  const {
+    latexCode,
+    setResumeState,
+    pdfUrl,
+    diffPdfUrl,
+    resumeId,
+    label,
+    isStreamingLatex,
+  } = useResumeStore();
 
   const [showDiff, setShowDiff] = useState(false);
 
@@ -212,13 +219,14 @@ export function AnalyzeView() {
                 showDiff={showDiff}
                 onToggleDiff={() => setShowDiff(!showDiff)}
                 hasDiff={!!diffPdfUrl}
+                isStreamingLatex={isStreamingLatex}
               />
             )}
           </div>
 
           <TabsContent
             value="analysis"
-            className="flex-1 overflow-y-auto min-h-0 p-4 m-0 flex flex-col items-center justify-start w-full"
+            className="flex-1 overflow-y-auto min-h-0 p-4 md:p-6 m-0 flex flex-col items-start justify-start w-full"
           >
             {lines.length > 0 || running ? (
               <ProgressStream

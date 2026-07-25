@@ -27,3 +27,5 @@ Thumbs.db
 node_modules/
 BUGS.md
 .impeccable/
+*.env.*
+*.env

@@ -28,6 +28,7 @@ interface EditorToolbarProps {
   showDiff: boolean;
   onToggleDiff: () => void;
   hasDiff: boolean;
+  isStreamingLatex?: boolean;
 }
 
 export function EditorToolbar({
@@ -43,6 +44,7 @@ export function EditorToolbar({
   showDiff,
   onToggleDiff,
   hasDiff,
+  isStreamingLatex = false,
 }: EditorToolbarProps) {
   return (
     <div className="flex items-center gap-1 sm:gap-2">
@@ -207,12 +209,18 @@ export function EditorToolbar({
         size="sm"
         className="font-sans text-[12px] font-semibold h-8 rounded-md px-2 sm:px-3 ml-auto"
         onClick={onCompile}
-        disabled={isCompiling}
+        disabled={isCompiling || isStreamingLatex}
       >
         {isCompiling ? (
           <>
             <Loader2 size={13} className="animate-spin" />
             <span className="hidden sm:inline ml-1">Compiling...</span>
+          </>
+        ) : isStreamingLatex ? (
+          <>
+            <Loader2 size={13} className="animate-spin" />
+            <span className="hidden sm:inline ml-1">AI Writing...</span>
+            <span className="inline sm:hidden ml-1">Writing</span>
           </>
         ) : (
           <>

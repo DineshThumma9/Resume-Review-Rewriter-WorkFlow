@@ -1,5 +1,4 @@
 import logging
-from typing import Optional
 
 from langchain.chat_models import init_chat_model
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -15,12 +14,12 @@ logger = logging.getLogger(__name__)
 
 
 async def get_llm_client(
-    db: Optional[AsyncSession] = None,
-    user: Optional[User] = None,
-    provider: Optional[str] = None,
-    model: Optional[str] = None,
-    api_key: Optional[str] = None,
-    temperature: Optional[float] = None,
+    db: AsyncSession | None = None,
+    user: User | None = None,
+    provider: str | None = None,
+    model: str | None = None,
+    api_key: str | None = None,
+    temperature: float | None = None,
 ) -> BaseChatModel:
     """
     Initializes and returns a LangChain chat model.
@@ -32,9 +31,7 @@ async def get_llm_client(
 
     # 1. Resolve Provider and Model
     if db and user and (not provider or not model):
-        result = await db.execute(
-            select(UserLLMConfig).where(UserLLMConfig.user_id == user.id)
-        )
+        result = await db.execute(select(UserLLMConfig).where(UserLLMConfig.user_id == user.id))
         config = result.scalars().first()
         if config:
             provider = provider or config.provider
@@ -51,7 +48,6 @@ async def get_llm_client(
             resolved_api_key = await auth_service.get_api_key(resolved_provider, user)
         except Exception as e:
             logger.debug(f"Could not fetch user API key for {resolved_provider}: {e}")
-            pass
 
     if not resolved_api_key:
         provider_keys = {
@@ -73,12 +69,10 @@ async def get_llm_client(
         llm_kwargs["temperature"] = temperature
 
     try:
-        llm = init_chat_model(
-            resolved_model, model_provider=resolved_provider, **llm_kwargs
-        )
+        llm = init_chat_model(resolved_model, model_provider=resolved_provider, **llm_kwargs)
         return llm
     except Exception as e:
         logger.error(
             f"Failed to initialize model '{resolved_model}' with provider '{resolved_provider}': {e}"
         )
-        raise e
+        raise

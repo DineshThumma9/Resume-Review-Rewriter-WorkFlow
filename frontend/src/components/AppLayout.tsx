@@ -18,6 +18,7 @@ import { authApi } from "../apis/auth";
 import { useAuthStore } from "../store/authStore";
 import { useResumeStore } from "../store/resumeStore";
 import { AnalyzeView } from "../views/AnalyzeView";
+import { GlobalJobToasts } from "./GlobalJobToasts";
 
 import { AnimatePresence, motion } from "framer-motion";
 
@@ -179,6 +180,9 @@ export function AppLayout() {
           </AnimatePresence>
         )}
       </main>
+
+      {/* Global style-change job notifications — persists across page navigation */}
+      <GlobalJobToasts />
     </div>
   );
 }

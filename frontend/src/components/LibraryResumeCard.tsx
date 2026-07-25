@@ -1,10 +1,21 @@
-import { useState } from "react";
-import { FileText, Calendar, Trash2, Edit2 } from "lucide-react";
+import { useState, useEffect, useRef } from "react";
+import {
+  FileText,
+  Calendar,
+  Trash2,
+  Edit2,
+  Sparkles,
+  Loader2,
+  Copy,
+  Eye,
+} from "lucide-react";
 import type { Resume } from "../schemas";
 import { useNavigate } from "react-router-dom";
 import { useResumeStore } from "../store/resumeStore";
 import { resumeApi } from "../apis/resumes";
 import { templateApi } from "../apis/templates";
+import { startStyleChange } from "../apis/styleJob";
+import { useJobStore } from "../store/jobStore";
 import useSWR from "swr";
 import {
   Dialog,
@@ -17,7 +28,41 @@ import {
 import { Input } from "./ui/input";
 import { Button } from "./ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger } from "./ui/select";
-import { Loader2 } from "lucide-react";
+
+// ── Skeleton shimmer overlay for the thumbnail ───────────────────────────────
+function SkeletonOverlay({ label }: { label: string }) {
+  return (
+    <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-background/80 backdrop-blur-sm rounded-lg">
+      {/* Animated gradient shimmer */}
+      <div className="absolute inset-0 rounded-lg overflow-hidden">
+        <div className="absolute inset-0 bg-gradient-to-r from-transparent via-primary/10 to-transparent animate-[shimmer_1.6s_infinite]" />
+        {/* Fake line skeletons */}
+        <div className="p-5 flex flex-col gap-2 mt-6">
+          {[80, 60, 70, 55, 65, 50, 60].map((w, i) => (
+            <div
+              key={i}
+              className="h-2 rounded-full bg-muted-foreground/20"
+              style={{ width: `${w}%` }}
+            />
+          ))}
+        </div>
+      </div>
+      {/* Spinner + label */}
+      <div className="relative z-10 flex flex-col items-center gap-2">
+        <div className="w-10 h-10 rounded-full bg-primary/10 border border-primary/30 flex items-center justify-center">
+          <Loader2 className="w-5 h-5 text-primary animate-spin" />
+        </div>
+        <p className="text-xs font-medium text-foreground/80 text-center px-2">
+          Restyling with{" "}
+          <span className="text-primary font-semibold">{label}</span>…
+        </p>
+        <p className="text-[10px] text-muted-foreground text-center">
+          You can navigate away — we'll notify you when it's ready
+        </p>
+      </div>
+    </div>
+  );
+}
 
 export function LibraryResumeCard({
   resume,
@@ -30,15 +75,35 @@ export function LibraryResumeCard({
 }) {
   const navigate = useNavigate();
   const setResumeState = useResumeStore((s) => s.setResumeState);
+  const { addJob, connectSSE, jobs } = useJobStore();
+
   const [isRenameOpen, setIsRenameOpen] = useState(false);
   const [newLabel, setNewLabel] = useState(resume.label);
-  const [isRendering, setIsRendering] = useState(false);
-  const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(
-    null,
-  );
   const [isStyleDialogOpen, setIsStyleDialogOpen] = useState(false);
+  const [, setSelectedTemplateId] = useState<string | null>(null);
+  const [selectedTemplateName, setSelectedTemplateName] = useState<string>("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [startError, setStartError] = useState<string | null>(null);
+
+  const sseCleanupRef = useRef<(() => void) | null>(null);
 
   const { data: templates } = useSWR("templates", templateApi.list);
+
+  // Is there an active (pending/running) job for THIS resume?
+  const activeJob = jobs.find(
+    (j) =>
+      j.resumeId === resume.id &&
+      (j.status === "pending" || j.status === "running"),
+  );
+  const isProcessing = !!activeJob;
+
+  // If this card mounts and there's already a job for this resume in the store,
+  // make sure SSE is still connected (handles page refresh edge case via store rehydration)
+  useEffect(() => {
+    return () => {
+      sseCleanupRef.current?.();
+    };
+  }, []);
 
   const handleRenameSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -51,22 +116,15 @@ export function LibraryResumeCard({
   const handleViewPdf = (e: React.MouseEvent) => {
     e.preventDefault();
     if (!resume.pdf_url) return;
-
     if (resume.pdf_url.startsWith("data:application/pdf;base64,")) {
       try {
-        const base64Parts = resume.pdf_url.split(",");
-        const base64Data = base64Parts[1];
-        const byteCharacters = atob(base64Data);
-        const byteNumbers = new Array(byteCharacters.length);
-        for (let i = 0; i < byteCharacters.length; i++) {
-          byteNumbers[i] = byteCharacters.charCodeAt(i);
-        }
-        const byteArray = new Uint8Array(byteNumbers);
-        const blob = new Blob([byteArray], { type: "application/pdf" });
-        const blobUrl = URL.createObjectURL(blob);
-        window.open(blobUrl, "_blank");
-      } catch (err) {
-        console.error("Failed to parse base64 PDF:", err);
+        const b64 = resume.pdf_url.split(",")[1];
+        const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+        const url = URL.createObjectURL(
+          new Blob([bytes], { type: "application/pdf" }),
+        );
+        window.open(url, "_blank");
+      } catch {
         window.open(resume.pdf_url, "_blank");
       }
     } else {
@@ -74,42 +132,68 @@ export function LibraryResumeCard({
     }
   };
 
+  // mode: "inplace" updates this resume directly; "copy" creates a duplicate first
   const handleStyleConfirm = async (mode: "inplace" | "copy") => {
-    if (!selectedTemplateId) return;
+    if (!selectedTemplateName) return;
+    setIsSubmitting(true);
+    setStartError(null);
+
     try {
-      setIsRendering(true);
-      if (mode === "inplace") {
-        await resumeApi.render(resume.id, selectedTemplateId);
-      } else {
-        const newResume = await resumeApi.create(
+      let targetResumeId = resume.id;
+      let targetLabel = resume.label;
+
+      if (mode === "copy") {
+        // Create a duplicate resume first, then style the copy
+        const copy = await resumeApi.create(
           resume.label + " (Copy)",
           resume.tex_source || "",
           resume.content,
+          resume.pdf_url ?? undefined,
         );
-        await resumeApi.render(newResume.id, selectedTemplateId);
+        targetResumeId = copy.id;
+        targetLabel = copy.label;
       }
-      window.location.reload();
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setIsRendering(false);
+
+      const job = await startStyleChange(targetResumeId, selectedTemplateName);
+
+      // Register in global store immediately (optimistic)
+      addJob({
+        jobId: job.job_id,
+        resumeId: targetResumeId,
+        resumeLabel: targetLabel,
+        style: selectedTemplateName,
+        status: job.status ?? "pending",
+      });
+
+      // Open SSE stream and wire updates into store
+      const cleanup = connectSSE(job.job_id);
+      sseCleanupRef.current = cleanup;
+
       setIsStyleDialogOpen(false);
-      setSelectedTemplateId(null);
+    } catch (err) {
+      setStartError(
+        err instanceof Error ? err.message : "Failed to start style change",
+      );
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
   return (
     <div className="flex flex-col gap-4 p-5 rounded-2xl border border-border bg-card shadow-sm hover:shadow-md transition-shadow relative group">
-      {/* Thumbnail */}
+      {/* ── Thumbnail ── */}
       <div
         className="w-full rounded-lg bg-muted overflow-hidden border border-border relative"
         style={{ aspectRatio: "1 / 1.414" }}
       >
+        {/* Skeleton overlay when job is active */}
+        {isProcessing && <SkeletonOverlay label={activeJob!.style} />}
+
         {resume.preview_url ? (
           <img
             src={resume.preview_url}
             alt={resume.label}
-            className="w-full h-full object-contain transition-transform duration-300 group-hover:scale-[1.02]"
+            className={`w-full h-full object-contain transition-all duration-500 group-hover:scale-[1.02] ${isProcessing ? "opacity-30 blur-sm" : ""}`}
           />
         ) : (
           <div className="w-full h-full flex items-center justify-center text-muted-foreground opacity-30">
@@ -118,6 +202,7 @@ export function LibraryResumeCard({
         )}
       </div>
 
+      {/* ── Title row ── */}
       <div className="flex items-start justify-between">
         <div className="flex items-center gap-3 min-w-0 flex-1">
           <div className="min-w-0 flex-1">
@@ -158,15 +243,26 @@ export function LibraryResumeCard({
         </div>
       </div>
 
-      <div className="flex gap-2 mt-2">
+      {/* ── Action buttons ── */}
+      <div className="grid grid-cols-3 gap-1.5 sm:gap-2 mt-3 w-full">
         {resume.pdf_url ? (
           <button
             onClick={handleViewPdf}
-            className="flex-1 inline-flex items-center justify-center px-3 py-2 text-sm font-medium rounded-lg bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
+            className="w-full inline-flex items-center justify-center gap-1.5 px-2 py-2 text-xs font-semibold rounded-lg bg-primary/10 text-primary hover:bg-primary/20 transition-colors h-9 min-w-0"
+            title="View Compiled PDF"
           >
-            View PDF
+            <Eye size={14} className="shrink-0" />
+            <span className="hidden md:inline truncate">View PDF</span>
           </button>
-        ) : null}
+        ) : (
+          <div
+            className="w-full h-9 bg-muted/30 rounded-lg flex items-center justify-center text-[10px] text-muted-foreground/60 font-medium border border-dashed border-border/50"
+            title="No compiled PDF available"
+          >
+            <Eye size={14} className="opacity-40" />
+          </div>
+        )}
+
         <button
           onClick={() => {
             setResumeState({
@@ -178,30 +274,45 @@ export function LibraryResumeCard({
             });
             navigate("/analyze", { state: { tab: "editor" } });
           }}
-          className="flex-1 inline-flex items-center justify-center px-3 py-2 text-sm font-medium rounded-lg border border-border bg-background hover:bg-muted text-foreground transition-colors"
+          className="w-full inline-flex items-center justify-center gap-1.5 px-2 py-2 text-xs font-semibold rounded-lg border border-border bg-background hover:bg-muted text-foreground transition-colors h-9 min-w-0"
+          title="Edit TeX & Resume Content"
         >
-          Edit
+          <FileText size={14} className="shrink-0" />
+          <span className="hidden md:inline truncate">Edit</span>
         </button>
+
+        {/* ── Change Style button ── */}
         <Select
           onValueChange={(val) => {
+            const tpl = templates?.find((t) => String(t.id) === val);
             setSelectedTemplateId(val);
+            setSelectedTemplateName(tpl?.name ?? val);
+            setStartError(null);
             setIsStyleDialogOpen(true);
           }}
-          disabled={isRendering || !templates || !resume.tex_source}
+          disabled={isProcessing || !templates || !resume.tex_source}
           value=""
         >
           <SelectTrigger
-            className="flex-1 inline-flex items-center justify-center px-3 py-2 text-sm font-medium rounded-lg border border-border bg-background hover:bg-muted text-foreground transition-colors disabled:opacity-50 h-[38px]"
+            className={`w-full inline-flex items-center justify-center gap-1.5 px-2 py-2 text-xs font-semibold rounded-lg border border-border bg-background hover:bg-muted text-foreground transition-colors disabled:opacity-50 h-9 min-w-0 overflow-hidden ${isProcessing ? "cursor-not-allowed" : ""}`}
             title={
               !resume.tex_source
                 ? "Style conversion requires a LaTeX-generated resume"
-                : "Change Style"
+                : isProcessing
+                  ? "A style change is already in progress…"
+                  : "Change Style"
             }
           >
-            {isRendering ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
+            {isProcessing ? (
+              <>
+                <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
+                <span className="hidden md:inline truncate">Styling…</span>
+              </>
             ) : (
-              <span>Style</span>
+              <>
+                <Sparkles className="w-3.5 h-3.5 shrink-0 text-amber-500" />
+                <span className="hidden md:inline truncate">Style</span>
+              </>
             )}
           </SelectTrigger>
           <SelectContent>
@@ -214,37 +325,77 @@ export function LibraryResumeCard({
         </Select>
       </div>
 
-      {/* STYLE DIALOG */}
+      {/* ── Change Style Confirmation Dialog ── */}
       <Dialog open={isStyleDialogOpen} onOpenChange={setIsStyleDialogOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Change Resume Style</DialogTitle>
+            <DialogTitle className="flex items-center gap-2">
+              <Sparkles className="w-5 h-5 text-primary" />
+              Change Resume Style
+            </DialogTitle>
             <DialogDescription>
-              Do you want to update this resume in-place, or create a copy with
-              the new style?
+              Apply{" "}
+              <span className="font-semibold text-foreground">
+                "{selectedTemplateName}"
+              </span>{" "}
+              to{" "}
+              <span className="font-semibold text-foreground">
+                "{resume.label}"
+              </span>
+              ?
             </DialogDescription>
           </DialogHeader>
-          <DialogFooter className="flex gap-2 sm:justify-center mt-4">
+
+          {startError && (
+            <p className="text-sm text-red-500 bg-red-500/10 rounded-lg px-3 py-2">
+              {startError}
+            </p>
+          )}
+
+          <DialogFooter className="flex flex-col sm:flex-row gap-2 mt-3">
+            <Button
+              type="button"
+              variant="ghost"
+              disabled={isSubmitting}
+              onClick={() => {
+                setIsStyleDialogOpen(false);
+                setSelectedTemplateId(null);
+              }}
+            >
+              Cancel
+            </Button>
             <Button
               type="button"
               variant="outline"
-              disabled={isRendering}
+              disabled={isSubmitting}
               onClick={() => handleStyleConfirm("copy")}
+              className="gap-2"
             >
+              {isSubmitting ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Copy className="w-4 h-4" />
+              )}
               Make a Copy
             </Button>
             <Button
               type="button"
-              disabled={isRendering}
+              disabled={isSubmitting}
               onClick={() => handleStyleConfirm("inplace")}
+              className="gap-2"
             >
+              {isSubmitting ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Sparkles className="w-4 h-4" />
+              )}
               Save In-place
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* RENAME DIALOG */}
+      {/* ── Rename Dialog ── */}
       <Dialog open={isRenameOpen} onOpenChange={setIsRenameOpen}>
         <DialogContent className="sm:max-w-md">
           <form onSubmit={handleRenameSubmit} className="space-y-4">

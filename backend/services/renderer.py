@@ -70,11 +70,11 @@ def optimize_projects_for_rendering(data: dict) -> dict:
             tech_lower = tech_clean.lower()
 
             is_in_jd = False
-            if jd_text:
-                if tech_lower in jd_text.lower():
-                    is_in_jd = True
-                elif any(w in jd_words for w in re.findall(r"\b\w+\b", tech_lower)):
-                    is_in_jd = True
+            if jd_text and (
+                tech_lower in jd_text.lower()
+                or any(w in jd_words for w in re.findall(r"\b\w+\b", tech_lower))
+            ):
+                is_in_jd = True
 
             is_in_core = tech_lower in core_skills or any(
                 tech_lower in cs or cs in tech_lower for cs in core_skills

@@ -6,6 +6,8 @@ import {
   Image as ImageIcon,
   Trash,
   Edit2,
+  Eye,
+  FileText,
 } from "lucide-react";
 import { templateApi } from "../apis/templates";
 import type { Template } from "../schemas";
@@ -20,6 +22,7 @@ import {
 } from "../components/ui/dialog";
 import { Input } from "../components/ui/input";
 
+import { API_URL } from "../apis/api";
 import { useNavigate } from "react-router-dom";
 import { useResumeStore } from "../store/resumeStore";
 
@@ -124,20 +127,11 @@ export function TemplatesView() {
           {templates.map((t) => (
             <div
               key={t.id}
-              onClick={() => {
-                setResumeState({
-                  latexCode: t.tex_source || "",
-                  pdfUrl: t.preview_url || null,
-                  templateId: String(t.id),
-                  label: t.name,
-                });
-                navigate("/analyze", { state: { tab: "editor" } });
-              }}
-              className="border border-border bg-card rounded-xl p-5 flex flex-col gap-2 hover:border-primary/40 hover:shadow-md transition-all cursor-pointer group"
+              className="border border-border bg-card rounded-xl p-5 flex flex-col gap-3 hover:border-primary/40 hover:shadow-md transition-all group"
             >
               {/* Full-page preview — A4 aspect ratio (1:1.414), full image visible */}
               <div
-                className="w-full rounded-lg bg-muted overflow-hidden border border-border relative mb-2"
+                className="w-full rounded-lg bg-muted overflow-hidden border border-border relative"
                 style={{ aspectRatio: "1 / 1.414" }}
               >
                 {t.preview_url ? (
@@ -157,10 +151,13 @@ export function TemplatesView() {
                 )}
               </div>
               <div className="flex items-center justify-between">
-                <span className="font-semibold text-sm text-foreground">
+                <span
+                  className="font-semibold text-sm text-foreground truncate max-w-[150px]"
+                  title={t.name}
+                >
                   {t.name}
                 </span>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1.5">
                   <span
                     className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
                       t.is_builtin
@@ -173,8 +170,7 @@ export function TemplatesView() {
                   {!t.is_builtin && (
                     <>
                       <button
-                        onClick={(e) => {
-                          e.stopPropagation();
+                        onClick={() => {
                           setRenameTemplateId(t.id);
                           setRenameName(t.name);
                         }}
@@ -184,8 +180,7 @@ export function TemplatesView() {
                         <Edit2 size={14} />
                       </button>
                       <button
-                        onClick={(e) => {
-                          e.stopPropagation();
+                        onClick={() => {
                           setDeleteTemplateId(t.id);
                         }}
                         className="p-1 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
@@ -196,6 +191,63 @@ export function TemplatesView() {
                     </>
                   )}
                 </div>
+              </div>
+
+              {/* Action buttons: View PDF / Edit */}
+              <div className="grid grid-cols-2 gap-2 mt-2 w-full">
+                {t.preview_url ? (
+                  <button
+                    onClick={() => {
+                      const targetUrl = t.preview_url;
+                      if (
+                        targetUrl &&
+                        targetUrl.includes("res.cloudinary.com")
+                      ) {
+                        const pdfUrl = targetUrl
+                          .replace(/\.(jpg|png)(\?.*)?$/i, ".pdf")
+                          .replace(/\/c_scale,[^/]+\//, "/")
+                          .replace(/\/f_jpg[^/]*\//, "/")
+                          .replace(/\/w_\d+[^/]*\//, "/");
+                        window.open(pdfUrl, "_blank");
+                      } else {
+                        window.open(
+                          `${API_URL}/templates/${t.id}/pdf`,
+                          "_blank",
+                        );
+                      }
+                    }}
+                    className="w-full inline-flex items-center justify-center gap-1.5 px-2 py-2 text-xs font-semibold rounded-lg bg-primary/10 text-primary hover:bg-primary/20 transition-colors h-9 min-w-0"
+                    title="View PDF Preview"
+                  >
+                    <Eye size={14} className="shrink-0" />
+                    <span className="hidden md:inline truncate">View PDF</span>
+                  </button>
+                ) : (
+                  <div
+                    className="w-full h-9 bg-muted/30 rounded-lg flex items-center justify-center text-[10px] text-muted-foreground/60 font-medium border border-dashed border-border/50"
+                    title="No PDF preview available"
+                  >
+                    <Eye size={14} className="opacity-40" />
+                  </div>
+                )}
+                <button
+                  onClick={() => {
+                    setResumeState({
+                      latexCode: t.tex_source || "",
+                      pdfUrl: t.preview_url || null,
+                      templateId: String(t.id),
+                      label: t.name,
+                    });
+                    navigate("/analyze", { state: { tab: "editor" } });
+                  }}
+                  className="w-full inline-flex items-center justify-center gap-1.5 px-2 py-2 text-xs font-semibold rounded-lg border border-border bg-background hover:bg-muted text-foreground transition-colors h-9 min-w-0"
+                  title="Use Template in Editor"
+                >
+                  <FileText size={14} className="shrink-0" />
+                  <span className="hidden md:inline truncate">
+                    Use Template
+                  </span>
+                </button>
               </div>
             </div>
           ))}

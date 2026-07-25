@@ -1,9 +1,10 @@
+import copy
 import logging
 
-from sqlalchemy import select
+from sqlalchemy import desc, select
 
 from core.database import AsyncSessionLocal
-from models.models import Template
+from models.models import Resume, Template
 from services.renderer import render_resume_template_from_string
 from services.storage import upload_pdf_to_cloudinary
 from services.workflow import ResumeWorkflowService
@@ -30,17 +31,11 @@ async def generate_template_preview_task(template_id: int):
             )
             template = result.scalar_one_or_none()
             if not template:
-                logger.error(
-                    f"Template {template_id} not found for preview generation."
-                )
+                logger.error(f"Template {template_id} not found for preview generation.")
                 return
 
-            # Determine data to render
-            from sqlalchemy import desc
-
-            from models.models import Resume
-
             resume_data = DUMMY_RESUME_DATA
+            latest_resume = None
             if template.user_id:
                 # Get the user's most recent resume
                 res = await session.execute(
@@ -63,12 +58,9 @@ async def generate_template_preview_task(template_id: int):
 
             # 2. Render LaTeX
             tex_source = template.tex_source
-            if latest_resume and latest_resume.jd_snippet:
-                if isinstance(resume_data, dict):
-                    import copy
-
-                    resume_data = copy.deepcopy(resume_data)
-                    resume_data["jd"] = latest_resume.jd_snippet
+            if latest_resume and latest_resume.jd_snippet and isinstance(resume_data, dict):
+                resume_data = copy.deepcopy(resume_data)
+                resume_data["jd"] = latest_resume.jd_snippet
             latex_code = render_resume_template_from_string(tex_source, resume_data)
 
             # 3. Compile to PDF

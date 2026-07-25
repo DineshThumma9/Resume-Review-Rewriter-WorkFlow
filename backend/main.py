@@ -2,7 +2,6 @@ import logging
 import os
 from contextlib import asynccontextmanager
 
-import redis.asyncio as redis
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -15,6 +14,7 @@ from core.config import settings
 from core.database import create_tables
 from core.rate_limit import limiter
 from utils.http_client import close_http_client
+from utils.pubsub import close_redis, get_redis
 
 load_dotenv()
 
@@ -35,17 +35,16 @@ async def lifespan(app: FastAPI):
     """Create DB tables and initialize redis on startup."""
     await create_tables()
     try:
-        redis_conn = redis.from_url(
-            settings.redis_url, encoding="utf-8", decode_responses=True
-        )
+        redis_client = await get_redis()
+        await redis_client.ping()
         logger.info("Connected to Redis successfully")
     except Exception as e:
         logger.error(f"Failed to initialize Redis: {e}")
     yield
     try:
-        if "redis_conn" in locals():
-            await redis_conn.close()  # type: ignore
+        await close_redis()
         await close_http_client()
+        logger.info("Shutdown completed successfully")
     except Exception as e:
         logger.error(f"Error during shutdown: {e}")
 

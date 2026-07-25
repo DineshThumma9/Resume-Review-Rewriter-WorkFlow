@@ -1,3 +1,4 @@
+import asyncio
 import logging
 
 import cloudinary
@@ -14,7 +15,8 @@ cloudinary.config(secure=True)
 
 async def upload_pdf_to_cloudinary(pdf_bytes: bytes, filename: str) -> dict:
     try:
-        response = cloudinary.uploader.upload(
+        response = await asyncio.to_thread(
+            cloudinary.uploader.upload,
             pdf_bytes,
             resource_type="image",
             public_id=filename.replace(".pdf", ""),
@@ -24,7 +26,7 @@ async def upload_pdf_to_cloudinary(pdf_bytes: bytes, filename: str) -> dict:
         pdf_url = response.get("secure_url")
         public_id = response.get("public_id")
 
-        image_url, options = cloudinary_url(
+        image_url, _options = cloudinary_url(
             f"{public_id}.jpg",
             width=800,
             crop="scale",

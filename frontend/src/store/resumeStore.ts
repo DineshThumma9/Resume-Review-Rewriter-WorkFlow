@@ -11,6 +11,7 @@ interface ResumeState {
   jd: string;
   tone: string;
   file: File | null;
+  isStreamingLatex: boolean;
   setResumeState: (state: Partial<ResumeState>) => void;
   resetResumeState: () => void;
 }
@@ -26,6 +27,7 @@ const initialState = {
   jd: "",
   tone: "Professional",
   file: null,
+  isStreamingLatex: false,
 };
 
 export const useResumeStore = create<ResumeState>((set) => ({

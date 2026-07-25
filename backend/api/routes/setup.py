@@ -1,18 +1,19 @@
-from typing import Dict, List
+import logging
 
 from dotenv import load_dotenv
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
-from loguru import logger
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.database import get_session
+from core.database import DB, get_session
 from models.models import APIKEYS, UserLLMConfig
 from schemas.schema import API_KEY_REQUEST, API_KEY_RESPONSE
 from services.auth_service import AuthService, CryptoService
 from services.resume_service import CurrentUser
 from utils.constants import VALID_PROVIDERS
+
+logger = logging.getLogger(__name__)
 
 load_dotenv()
 router = APIRouter(prefix="/setup", tags=["setup"])
@@ -23,7 +24,7 @@ crypto = CryptoService()
 async def set_api_provider(
     req: API_KEY_REQUEST,
     current_user: CurrentUser,
-    db: AsyncSession = Depends(get_session),
+    db: DB,
 ):
     api_provider = req.api_provider.strip().lower().replace(" ", "_")
     api_key = req.api_key.strip()
@@ -33,13 +34,13 @@ async def set_api_provider(
 
     auth_service = AuthService(db)
     await auth_service.save_api_key(api_provider, api_key, current_user)
-    return {"message": "Successfully key added", "status_code": 200}
+    return {"message": "Successfully key added"}
 
 
 @router.post("/providers")
 async def choose_llm_provider(
     current_user: CurrentUser,
-    body: Dict = Body(...),
+    body: dict = Body(...),
     db: AsyncSession = Depends(get_session),
 ):
     provider = body.get("provider")
@@ -118,10 +119,8 @@ async def choose_llm_model(
     return {"message": f"Model set to {model} for {provider}"}
 
 
-@router.get("/api-config", response_model=List[API_KEY_RESPONSE])
-async def api_config(
-    current_user: CurrentUser, db: AsyncSession = Depends(get_session)
-):
+@router.get("/api-config", response_model=list[API_KEY_RESPONSE])
+async def api_config(current_user: CurrentUser, db: AsyncSession = Depends(get_session)):
     api_configs_result = await db.execute(
         select(APIKEYS).where(APIKEYS.user_id == current_user.id)  # type: ignore
     )

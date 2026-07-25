@@ -69,8 +69,6 @@ export const AnalyzeEventSchema = z.discriminatedUnion("event", [
   }),
   z.object({
     event: z.literal("analysis_done"),
-    step: z.string(),
-    message: z.string(),
   }),
   z.object({
     event: z.literal("complete"),

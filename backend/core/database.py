@@ -7,15 +7,21 @@ Tables are created on app startup via create_tables().
 
 import logging
 import os
-from typing import AsyncGenerator
+from collections.abc import AsyncGenerator
+from typing import Annotated, Any, cast
 
 from dotenv import load_dotenv
+from fastapi import Depends
 from sqlalchemy import text, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlmodel import SQLModel, select
 
 from core.config import settings
-from models.models import Resume, Template
+from models.models import (  # noqa: F401 – ensures table is registered
+    Resume,
+    ResumeJob,
+    Template,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -44,13 +50,33 @@ async def get_session() -> AsyncGenerator[AsyncSession, None]:
             raise
 
 
+DB = Annotated[AsyncSession, Depends(get_session)]
+
+
 async def seed_templates(session: AsyncSession):
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     templates_dir = os.path.join(base_dir, "templates")
 
-    allowed_builtin_names = {"modern1", "mordern2", "mordern3"}
+    allowed_builtin_names = {"modern1", "modern2", "modern3"}
 
-    # Find stale builtin templates (builtins not in the allowed set)
+    # 1. Purge any legacy templates with misspelled "mordern" in name (builtin or custom)
+    mordern_result = await session.execute(
+        select(Template).where(cast(Any, Template.name).ilike("%mordern%"))
+    )
+    mordern_templates = mordern_result.scalars().all()
+    if mordern_templates:
+        mordern_ids = [t.id for t in mordern_templates]
+        await session.execute(
+            update(Resume)
+            .where(Resume.template_id.in_(mordern_ids))  # type: ignore
+            .values(template_id=None)
+        )
+        await session.flush()
+        for tmpl in mordern_templates:
+            await session.delete(tmpl)
+        await session.flush()
+
+    # 2. Find and remove non-canonical builtins
     stale_result = await session.execute(select(Template).where(Template.is_builtin))
     stale_templates = [
         t for t in stale_result.scalars().all() if t.name not in allowed_builtin_names
@@ -74,27 +100,44 @@ async def seed_templates(session: AsyncSession):
 
     preview_urls = {
         "modern1": "/previews/template_1-1.jpg",
-        "mordern2": "/previews/template_2-1.jpg",
-        "mordern3": "/previews/template_3-1.jpg",
+        "modern2": "/previews/template_2-1.jpg",
+        "modern3": "/previews/template_3-1.jpg",
     }
 
-    # Seed / refresh the three canonical builtin templates
+    # 3. Seed / refresh / deduplicate the three canonical builtin templates
     for template_name in sorted(allowed_builtin_names):
         result = await session.execute(
             select(Template).where(Template.name == template_name, Template.is_builtin)
         )
-        existing = result.scalar_one_or_none()
+        existing_list = result.scalars().all()
+
+        canonical_template: Template | None = None
+        if existing_list:
+            canonical_template = existing_list[0]
+            # Deduplicate if multiple builtins exist with the same name
+            if len(existing_list) > 1:
+                dup_templates = existing_list[1:]
+                dup_ids = [t.id for t in dup_templates]
+                await session.execute(
+                    update(Resume)
+                    .where(Resume.template_id.in_(dup_ids))  # type: ignore
+                    .values(template_id=canonical_template.id)
+                )
+                await session.flush()
+                for dup in dup_templates:
+                    await session.delete(dup)
+                await session.flush()
 
         template_path = os.path.join(templates_dir, f"{template_name}.tex")
         if not os.path.exists(template_path):
             continue
 
-        with open(template_path, "r", encoding="utf-8") as f:
+        with open(template_path, encoding="utf-8") as f:
             tex_source = f.read()
 
         preview_url = preview_urls.get(template_name)
 
-        if not existing:
+        if canonical_template is None:
             # First-time seed
             session.add(
                 Template(
@@ -105,10 +148,13 @@ async def seed_templates(session: AsyncSession):
                 )
             )
             logger.info("Seeded builtin template: %s", template_name)
-        elif existing.tex_source != tex_source or existing.preview_url != preview_url:
+        elif (
+            canonical_template.tex_source != tex_source
+            or canonical_template.preview_url != preview_url
+        ):
             # File changed on disk or preview url missing — update
-            existing.tex_source = tex_source
-            existing.preview_url = preview_url
+            canonical_template.tex_source = tex_source
+            canonical_template.preview_url = preview_url
             logger.info("Updated builtin template: %s", template_name)
 
     await session.commit()
@@ -123,9 +169,7 @@ async def create_tables() -> None:
     for col in ["github", "linkedin", "website", "location", "phone", "raw_resume"]:
         try:
             async with engine.begin() as conn:
-                await conn.execute(
-                    text(f"ALTER TABLE users ADD COLUMN IF NOT EXISTS {col} TEXT")
-                )
+                await conn.execute(text(f"ALTER TABLE users ADD COLUMN IF NOT EXISTS {col} TEXT"))
         except Exception as e:
             logger.warning(f"Could not add column {col} to users table: {e}")
 
@@ -133,9 +177,7 @@ async def create_tables() -> None:
     try:
         async with engine.begin() as conn:
             await conn.execute(
-                text(
-                    "ALTER TABLE resumes DROP CONSTRAINT IF EXISTS resumes_template_id_fkey"
-                )
+                text("ALTER TABLE resumes DROP CONSTRAINT IF EXISTS resumes_template_id_fkey")
             )
             await conn.execute(
                 text(
@@ -143,9 +185,7 @@ async def create_tables() -> None:
                 )
             )
     except Exception as e:
-        logger.warning(
-            f"Could not update resumes template_id foreign key constraint: {e}"
-        )
+        logger.warning(f"Could not update resumes template_id foreign key constraint: {e}")
 
     # Seed builtin templates
     async with AsyncSessionLocal() as session:

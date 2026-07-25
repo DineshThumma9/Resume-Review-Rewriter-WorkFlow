@@ -10,8 +10,6 @@ This file re-exports everything so existing `from schemas.schema import X` impor
 continue to work without modification.
 """
 
-# ruff: noqa: F401
-
 from schemas.auth_schema import (
     API_KEY_REQUEST,
     API_KEY_RESPONSE,
@@ -31,6 +29,7 @@ from schemas.resume_request_schema import (
     ResumeCreate,
     ResumeOut,
     ResumeUpdate,
+    SyncContentRequest,
     TemplateCreate,
     TemplateOut,
     TemplateUpdate,
@@ -51,37 +50,38 @@ from schemas.resume_schema import (
 )
 
 __all__ = [
-    # resume_schema
-    "BatchedRewriteResponse",
-    "BulletRewriteOutput",
-    "Details",
-    "Education",
-    "Experience",
-    "JudgeResume",
-    "ProfileSummary",
-    "Project",
-    "ResumeAnalysis",
-    "ResumeState",
-    "RewriteResume",
-    "Skill",
     # auth_schema
     "API_KEY_REQUEST",
     "API_KEY_RESPONSE",
-    "GoogleExchangeBody",
-    "LoginBody",
-    "ProfileOut",
-    "ProfileUpdate",
-    "SignupBody",
     # resume_request_schema
     "AnalyzeRequest",
+    # resume_schema
+    "BatchedRewriteResponse",
+    "BulletRewriteOutput",
     "CompileRequest",
+    "Details",
+    "Education",
+    "Experience",
+    "GoogleExchangeBody",
+    "JudgeResume",
+    "LoginBody",
     "MaskDetails",
     "ModifyRequest",
     "PaginatedResume",
     "PaginatedTemplateResponse",
+    "ProfileOut",
+    "ProfileSummary",
+    "ProfileUpdate",
+    "Project",
+    "ResumeAnalysis",
     "ResumeCreate",
     "ResumeOut",
+    "ResumeState",
     "ResumeUpdate",
+    "RewriteResume",
+    "SignupBody",
+    "Skill",
+    "SyncContentRequest",
     "TemplateCreate",
     "TemplateOut",
     "TemplateUpdate",

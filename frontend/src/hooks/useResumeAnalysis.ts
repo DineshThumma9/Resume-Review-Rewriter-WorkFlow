@@ -352,6 +352,13 @@ export function useResumeAnalysis() {
   };
 
   const handleCompile = async () => {
+    const isStreaming = useResumeStore.getState().isStreamingLatex;
+    if (isStreaming) {
+      setApiError(
+        "LaTeX code is currently being generated/modified by AI. Please wait until streaming completes before compiling the PDF.",
+      );
+      return;
+    }
     try {
       setIsCompiling(true);
       setCompileError(null);

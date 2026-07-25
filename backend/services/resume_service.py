@@ -1,17 +1,17 @@
 import base64
 import json
 import logging
-from datetime import datetime, timezone
-from typing import Annotated, Any, Dict, Optional, cast
+from datetime import UTC, datetime
+from typing import Annotated, Any, cast
 
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPBearer
 from langchain_core.messages import HumanMessage, SystemMessage
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
-from sqlmodel import select as _select
 
 from core.database import get_session
+from core.llm_throttle import throttle_provider
 from core.security import decode_access_token
 from models import User
 from models.models import Template
@@ -54,19 +54,16 @@ async def get_current_user(
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
     if user is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found"
-        )
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
 
     return user
 
 
 async def mask_resume(resume_content, mask_details: MaskDetails):
     resume_content = RewriteResume.model_validate(resume_content)
-    if mask_details.project_name:
-        if resume_content.projects:
-            for project in resume_content.projects:
-                project.name = "PROJECT NAME"
+    if mask_details.project_name and resume_content.projects:
+        for project in resume_content.projects:
+            project.name = "PROJECT NAME"
 
     if mask_details.company_name:
         if resume_content.experience:
@@ -76,11 +73,10 @@ async def mask_resume(resume_content, mask_details: MaskDetails):
             for internship in resume_content.internships:
                 internship.company = "COMPANY NAME"
 
-    if mask_details.education:
-        if resume_content.education:
-            for edu in resume_content.education:
-                if edu.institution:
-                    edu.institution = "UNIVERSITY NAME"
+    if mask_details.education and resume_content.education:
+        for edu in resume_content.education:
+            if edu.institution:
+                edu.institution = "UNIVERSITY NAME"
 
     if resume_content.details:
         if mask_details.name and resume_content.details.name:
@@ -166,9 +162,7 @@ def mask_latex(latex_code: str, resume_content: dict, mask_details: MaskDetails)
                         replacements.append((p, "Doe"))
 
         if mask_details.email and resume_content_model.details.email:
-            replacements.append(
-                (resume_content_model.details.email, "doejohn@example.com")
-            )
+            replacements.append((resume_content_model.details.email, "doejohn@example.com"))
 
         if mask_details.phone and resume_content_model.details.contact:
             contact = resume_content_model.details.contact
@@ -181,33 +175,25 @@ def mask_latex(latex_code: str, resume_content: dict, mask_details: MaskDetails)
             replacements.append((resume_content_model.details.location, "LOCATION"))
 
         if mask_details.github and resume_content_model.details.github:
-            replacements.append(
-                (resume_content_model.details.github, "GITHUB USERNAME")
-            )
+            replacements.append((resume_content_model.details.github, "GITHUB USERNAME"))
             uname = extract_username(resume_content_model.details.github)
             if uname:
                 replacements.append((uname, "GITHUB USERNAME"))
 
         if mask_details.linkedin and resume_content_model.details.linkedin:
-            replacements.append(
-                (resume_content_model.details.linkedin, "LINKEDIN_USERNAME")
-            )
+            replacements.append((resume_content_model.details.linkedin, "LINKEDIN_USERNAME"))
             uname = extract_username(resume_content_model.details.linkedin)
             if uname:
                 replacements.append((uname, "LINKEDIN_USERNAME"))
 
         if mask_details.leetcode and resume_content_model.details.leetcode:
-            replacements.append(
-                (resume_content_model.details.leetcode, "LEETCODE USERNAME")
-            )
+            replacements.append((resume_content_model.details.leetcode, "LEETCODE USERNAME"))
             uname = extract_username(resume_content_model.details.leetcode)
             if uname:
                 replacements.append((uname, "LEETCODE USERNAME"))
 
         if mask_details.portfolio and resume_content_model.details.portfolio:
-            replacements.append(
-                (resume_content_model.details.portfolio, "PORTFOLIO_URL")
-            )
+            replacements.append((resume_content_model.details.portfolio, "PORTFOLIO_URL"))
 
     # deduplicate and sort
     replacements = list(set(replacements))
@@ -224,9 +210,7 @@ def mask_latex(latex_code: str, resume_content: dict, mask_details: MaskDetails)
 CurrentUser = Annotated[User, Depends(get_current_user)]
 
 
-async def autofill_resume_profile(
-    resume_text: str, user: User, db: AsyncSession
-) -> Dict[str, Any]:
+async def autofill_resume_profile(resume_text: str, user: User, db: AsyncSession) -> dict[str, Any]:
     """
     Parse a resume's raw text into a structured profile dictionary using the LLM.
     This is a pure resume-domain operation: it has no HTTP or authentication concerns.
@@ -240,15 +224,17 @@ async def autofill_resume_profile(
     """
 
     llm = await get_llm_client(db, user=user)
+    provider_name = getattr(llm, "model_provider", None)
 
     # ── Call 1: Extract personal details + links with precision ──────────
-    details_obj: Optional[Details] = None
+    details_obj: Details | None = None
     try:
         details_llm = llm.with_structured_output(Details)
         details_messages = [
             SystemMessage(content=extract_details_prompt),
             HumanMessage(content=f"Resume text:\n{resume_text}"),
         ]
+        await throttle_provider(provider_name)
         raw_details = await details_llm.ainvoke(details_messages)
         details_obj = cast(Details, raw_details)
     except Exception as details_err:
@@ -260,6 +246,7 @@ async def autofill_resume_profile(
         SystemMessage(content=parse_resume_prompt),
         HumanMessage(content=f"Resume text:\n{resume_text}"),
     ]
+    await throttle_provider(provider_name)
     raw_parsed = await structured_llm.ainvoke(messages)
     if not raw_parsed:
         raise ValueError("LLM returned an empty parsed result.")
@@ -293,8 +280,8 @@ async def save_and_upload(
     latex_code: str,
     user: User,
     resume_id: int,
-    pdf_base64: Optional[str] = None,
-) -> tuple[str, Optional[str]]:
+    pdf_base64: str | None = None,
+) -> tuple[str, str | None]:
     """
     Compile LaTeX source to PDF (if not already base64), upload to Cloudinary,
     and return (pdf_url, preview_image_url).
@@ -313,22 +300,18 @@ async def save_and_upload(
     else:
         service = ResumeWorkflowService()
         pdf_bytes = await service.latex_to_pdf(latex_code, "resume.pdf")
-        import base64 as _b64
-
-        pdf_url = f"data:application/pdf;base64,{_b64.b64encode(pdf_bytes).decode()}"
+        pdf_url = f"data:application/pdf;base64,{base64.b64encode(pdf_bytes).decode()}"
 
     preview_url = None
     try:
-        ts = int(datetime.now(timezone.utc).timestamp())
+        ts = int(datetime.now(UTC).timestamp())
         filename = f"resume_{user.id}_{resume_id}_{ts}.pdf"
         upload_res = await upload_pdf_to_cloudinary(pdf_bytes, filename)
         if upload_res:
             pdf_url = upload_res.get("pdf_url") or pdf_url
             preview_url = upload_res.get("preview_image_url")
     except Exception as err:
-        import logging as _log
-
-        _log.getLogger(__name__).error(f"Failed to upload resume: {err}")
+        logger.error(f"Failed to upload resume: {err}")
 
     return pdf_url, preview_url
 
@@ -343,7 +326,7 @@ async def build_graph_state(
     tone: str,
     jd: str,
     resume_text: str,
-    page_count: Optional[int] = None,
+    page_count: int | None = None,
 ) -> dict:
     """
     Assemble the initial LangGraph state dict for the resume analysis workflow.
@@ -363,9 +346,7 @@ async def build_graph_state(
     template_source = None
     db_template_id = None
     if template_id and template_id.isdigit():
-        t_res = await db.execute(
-            _select(Template).where(Template.id == int(template_id))
-        )
+        t_res = await db.execute(select(Template).where(Template.id == int(template_id)))
         template_obj = t_res.scalar_one_or_none()
         if template_obj:
             template_source = template_obj.tex_source

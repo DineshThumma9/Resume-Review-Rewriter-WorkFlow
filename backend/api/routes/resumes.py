@@ -1,14 +1,15 @@
 import asyncio
 import base64
+import copy
 import json
 import logging
 import traceback
-from datetime import datetime, timezone
-from typing import Annotated, Optional
+from datetime import UTC, datetime
+from typing import Any, cast
 
 from fastapi import (
     APIRouter,
-    Depends,
+    BackgroundTasks,
     File,
     Form,
     HTTPException,
@@ -23,9 +24,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 
 from core.config import settings
-from core.database import get_session
+from core.database import DB, AsyncSessionLocal
 from core.rate_limit import user_limiter
-from models.models import Resume, Template
+from models.models import JobStatus, Resume, ResumeJob, Template, User
 from schemas.schema import (
     CompileRequest,
     ModifyRequest,
@@ -33,6 +34,8 @@ from schemas.schema import (
     ResumeCreate,
     ResumeOut,
     ResumeUpdate,
+    RewriteResume,
+    SyncContentRequest,
 )
 from services.llm_service import get_llm_client
 from services.renderer import render_resume_template, render_resume_template_from_string
@@ -41,6 +44,8 @@ from services.workflow import ResumeWorkflowService
 from utils.constants import DEFAULT_LLM_MODEL, DEFAULT_LLM_PROVIDER
 from utils.error_helpers import classify_llm_error
 from utils.pdf_extractor import extract_resume_text_and_links
+from utils.prompts import parse_resume_prompt
+from utils.pubsub import get_redis, publish_job_update
 from utils.resume_text import (
     extract_profile_details,
     extract_resume_details,
@@ -51,7 +56,10 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/resumes", tags=["resumes"])
 
-DB = Annotated[AsyncSession, Depends(get_session)]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Resume CRUD
+# ─────────────────────────────────────────────────────────────────────────────
 
 
 @router.get("", response_model=PaginatedResume)
@@ -82,11 +90,10 @@ async def get_resumes(user: CurrentUser, db: DB, skip: int = 0, limit: int = 100
 @router.post("", response_model=ResumeOut)
 async def create_resume(body: ResumeCreate, user: CurrentUser, db: DB):
     # Compile LaTeX and upload preview if tex_source is provided
-
     pdf_url, preview_url = await save_and_upload(
         latex_code=body.tex_source,
         user=user,
-        resume_id=int(datetime.now(timezone.utc).timestamp()),
+        resume_id=int(datetime.now(UTC).timestamp()),
         pdf_base64=body.pdf_url,
     )
 
@@ -123,7 +130,7 @@ async def compile_latex(body: CompileRequest, user: CurrentUser, db: DB):
                 if preview_url:
                     resume.preview_url = preview_url
 
-                resume.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+                resume.updated_at = datetime.now(UTC).replace(tzinfo=None)
                 await db.commit()
                 return {"pdf_url": pdf_url}
 
@@ -136,7 +143,7 @@ async def compile_latex(body: CompileRequest, user: CurrentUser, db: DB):
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"LaTeX compilation failed: {str(e)}",
+            detail=f"LaTeX compilation failed: {e!s}",
         )
 
 
@@ -183,7 +190,7 @@ async def update_resume(resume_id: int, body: ResumeUpdate, user: CurrentUser, d
         if preview_url is not None:
             resume.preview_url = preview_url
 
-    resume.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    resume.updated_at = datetime.now(UTC).replace(tzinfo=None)
     db.add(resume)
     await db.commit()
     await db.refresh(resume)
@@ -191,11 +198,8 @@ async def update_resume(resume_id: int, body: ResumeUpdate, user: CurrentUser, d
 
 
 @router.put("/{resume_id}/render")
-async def render_resume(
-    resume_id: int, user: CurrentUser, db: DB, template_id: str = ""
-):
+async def render_resume(resume_id: int, user: CurrentUser, db: DB, template_id: str = ""):
     """Re-render with a different template without re-running AI."""
-
     result = await db.execute(
         select(Resume).where(Resume.id == resume_id, Resume.user_id == user.id)
     )
@@ -211,26 +215,20 @@ async def render_resume(
     template_source = None
     db_template_id = None
     if template_id and template_id.isdigit():
-        t_res = await db.execute(
-            select(Template).where(Template.id == int(template_id))
-        )
+        t_res = await db.execute(select(Template).where(Template.id == int(template_id)))
         template_obj = t_res.scalar_one_or_none()
         if template_obj:
             template_source = template_obj.tex_source
             db_template_id = template_obj.id
 
     try:
-        data_dict = resume.content
-        if data_dict is not None and isinstance(data_dict, dict):
-            import copy
-
-            data_dict = copy.deepcopy(data_dict)
-            data_dict["jd"] = resume.jd_snippet
+        data_dict = copy.deepcopy(resume.content) if resume.content else {}
+        data_dict["jd"] = resume.jd_snippet
 
         if template_source and template_source.strip():
             latex_code = render_resume_template_from_string(template_source, data_dict)
         else:
-            latex_code = render_resume_template("jakes1.tex", data_dict)
+            latex_code = render_resume_template("modern1.tex", data_dict)
 
         pdf_url, preview_url = await save_and_upload(
             latex_code=latex_code, user=user, resume_id=resume_id
@@ -240,7 +238,7 @@ async def render_resume(
         if preview_url:
             resume.preview_url = preview_url
         resume.template_id = db_template_id
-        resume.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        resume.updated_at = datetime.now(UTC).replace(tzinfo=None)
         db.add(resume)
         await db.commit()
         await db.refresh(resume)
@@ -248,8 +246,13 @@ async def render_resume(
     except Exception as e:
         raise HTTPException(
             status.HTTP_500_INTERNAL_SERVER_ERROR,
-            f"Failed to re-render resume: {str(e)}",
+            f"Failed to re-render resume: {e!s}",
         )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# AI Analysis (streaming SSE)
+# ─────────────────────────────────────────────────────────────────────────────
 
 
 @router.post("/analyze")
@@ -265,7 +268,7 @@ async def analyze(
     provider: str = Form(DEFAULT_LLM_PROVIDER),
     model: str = Form(DEFAULT_LLM_MODEL),
     exclude_sections: str = Form("{}"),
-    resume_file: Optional[UploadFile] = File(None),
+    resume_file: UploadFile | None = File(None),
 ):
     """
     Main AI workflow. Streams progress as Server-Sent Events.
@@ -277,9 +280,7 @@ async def analyze(
             resume_text = ""
             page_count = None
             if resume_file is not None:
-                text_extracted, p_count = await extract_resume_text_and_links(
-                    resume_file
-                )
+                text_extracted, p_count = await extract_resume_text_and_links(resume_file)
                 resume_text += text_extracted
                 page_count = p_count
             else:
@@ -329,29 +330,15 @@ async def analyze(
                         # 1. Score & match — instant
                         yield f"data: {json.dumps({'event': 'analysis_score', 'score': analysis_data.get('score'), 'match': analysis_data.get('match'), 'urgency': analysis_data.get('urgency')})}\n\n"
 
-                        # 2. Resume quality — stream chunk by chunk
+                        # 2. Resume quality — send immediately
                         quality = analysis_data.get("resume_quality") or ""
                         if quality:
-                            chunk_size = 5
-                            for i in range(
-                                chunk_size, len(quality) + chunk_size, chunk_size
-                            ):
-                                yield f"data: {json.dumps({'event': 'analysis_quality', 'text': quality[:i]})}\n\n"
-                                await asyncio.sleep(0.01)
-                            if not quality or len(quality) % chunk_size != 0:
-                                yield f"data: {json.dumps({'event': 'analysis_quality', 'text': quality})}\n\n"
+                            yield f"data: {json.dumps({'event': 'analysis_quality', 'text': quality})}\n\n"
 
-                        # 3. Explanation — stream chunk by chunk
+                        # 3. Explanation — send immediately
                         explanation = analysis_data.get("match_explanation") or ""
                         if explanation:
-                            chunk_size = 5
-                            for i in range(
-                                chunk_size, len(explanation) + chunk_size, chunk_size
-                            ):
-                                yield f"data: {json.dumps({'event': 'analysis_explanation', 'text': explanation[:i]})}\n\n"
-                                await asyncio.sleep(0.01)
-                            if not explanation or len(explanation) % chunk_size != 0:
-                                yield f"data: {json.dumps({'event': 'analysis_explanation', 'text': explanation})}\n\n"
+                            yield f"data: {json.dumps({'event': 'analysis_explanation', 'text': explanation})}\n\n"
 
                         # 4. Missing keywords — one per event
                         for kw in analysis_data.get("missing_keywords") or []:
@@ -404,11 +391,7 @@ async def analyze(
                     error_msg = data.get("error", None)
 
                     resume_id = None
-                    if (
-                        latex_code
-                        and not latex_code.startswith("Error:")
-                        and not error_msg
-                    ):
+                    if latex_code and not latex_code.startswith("Error:") and not error_msg:
                         try:
                             changes_content = data.get("changes_content")
                             content_dict = None
@@ -418,9 +401,7 @@ async def analyze(
                                 elif isinstance(changes_content, dict):
                                     content_dict = changes_content
 
-                            resolved_label = resolve_resume_label(
-                                label, analysis_data, user
-                            )
+                            resolved_label = resolve_resume_label(label, analysis_data, user)
 
                             try:
                                 template_id_val = initial_state.get("template_id")
@@ -473,6 +454,11 @@ async def analyze(
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Modify LaTeX (streaming SSE)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
 @router.post("/modify")
 @user_limiter.limit("20/minute")
 async def modify_latex(
@@ -485,13 +471,11 @@ async def modify_latex(
     Modifies raw LaTeX code based on user instruction and streams the updated code.
     """
     try:
-        llm = await get_llm_client(
-            db, user=user, provider=req.provider, model=req.model
-        )
+        llm = await get_llm_client(db, user=user, provider=req.provider, model=req.model)
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Failed to initialize model: {str(e)}",
+            detail=f"Failed to initialize model: {e!s}",
         )
 
     async def modify_stream():
@@ -521,3 +505,328 @@ async def modify_latex(
             yield f"data: {json.dumps({'event': 'error', 'message': err_msg})}\n\n"
 
     return StreamingResponse(modify_stream(), media_type="text/event-stream")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Async style-change via background task + Redis Pub/Sub + SSE
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+async def _run_style_change(job_id: int, resume_id: int, style: str, user_id: int):
+    """
+    Background task: applies an LLM-driven style change to the resume, generates
+    a new PDF, persists the results and publishes completion via Redis Pub/Sub.
+    """
+
+    async def _set_status(session: AsyncSession, job: ResumeJob, st: JobStatus, **kw):
+        job.status = st.value
+        for k, v in kw.items():
+            setattr(job, k, v)
+        session.add(job)
+        await session.commit()
+        await publish_job_update(job_id, {"status": st.value, **kw})
+
+    async with AsyncSessionLocal() as session:
+        # Fetch the job
+        r = await session.execute(select(ResumeJob).where(ResumeJob.id == job_id))
+        job = r.scalar_one_or_none()
+        if not job:
+            logger.error("Job %s not found", job_id)
+            return
+
+        # Fetch the resume
+        rr = await session.execute(select(Resume).where(Resume.id == resume_id))
+        resume = rr.scalar_one_or_none()
+        if not resume:
+            await _set_status(session, job, JobStatus.FAILED, error_message="Resume not found")
+            return
+
+        # Fetch the user
+        ur = await session.execute(select(User).where(User.id == user_id))
+        user_obj = ur.scalar_one_or_none()
+        if not user_obj:
+            await _set_status(session, job, JobStatus.FAILED, error_message="User not found")
+            return
+
+        await _set_status(session, job, JobStatus.RUNNING)
+
+        try:
+            # ── 1. Parse the CURRENT tex_source → JSON ────────────────────────
+            # We MUST parse from tex_source (not resume.content) because the user
+            # may have made tweaks via the AI input box that only updated tex_source.
+            # resume.content still holds the old pre-tweak JSON, so using it would
+            # silently discard all manual edits.
+            #
+            # We use parse_resume_prompt (verbatim extraction, no rewriting) so the
+            # LLM copies content exactly as-is instead of hallucinating a summary,
+            # restoring deleted sections, or changing bullet text.
+            llm = await get_llm_client(session, user=user_obj)
+            parse_llm = llm.with_structured_output(RewriteResume)
+            parse_messages = [
+                SystemMessage(content=parse_resume_prompt),
+                HumanMessage(content=resume.tex_source or ""),
+            ]
+            try:
+                parsed = await parse_llm.ainvoke(parse_messages)
+                if hasattr(parsed, "model_dump") and callable(getattr(parsed, "model_dump", None)):
+                    resume.content = parsed.model_dump()  # type: ignore
+                elif isinstance(parsed, dict):
+                    resume.content = parsed
+                session.add(resume)
+                await session.commit()
+                logger.info(
+                    "Style-change job %s: parsed tex_source → JSON successfully.",
+                    job_id,
+                )
+            except Exception as parse_err:
+                logger.error(
+                    "Style-change job %s: failed to parse tex_source to JSON: %s",
+                    job_id,
+                    parse_err,
+                )
+                await _set_status(
+                    session,
+                    job,
+                    JobStatus.FAILED,
+                    error_message=f"Failed to parse resume content: {str(parse_err)[:300]}",
+                )
+                return
+
+            data_dict = copy.deepcopy(resume.content) if resume.content else {}
+
+            # Guard: suppress profile_summary if it is blank so the template never
+            # renders an empty Summary section or one that wasn't in the tweaked LaTeX.
+            ps = data_dict.get("profile_summary")
+            if ps is not None:
+                summary_text = ps.get("profile_summary") if isinstance(ps, dict) else str(ps)
+                if not summary_text or not str(summary_text).strip():
+                    data_dict["profile_summary"] = None
+
+            # ── 2. Fetch template from DB or fallback ─────────────────────────
+            t_res = await session.execute(
+                select(Template).where(cast(Any, Template.name).ilike(style))
+            )
+            template_obj = t_res.scalar_one_or_none()
+            data_dict["jd"] = resume.jd_snippet
+
+            if template_obj and template_obj.tex_source and template_obj.tex_source.strip():
+                new_latex = render_resume_template_from_string(template_obj.tex_source, data_dict)
+            else:
+                # Fallback to hardcoded ones
+                fallback_map = {
+                    "modern1": "modern1.tex",
+                    "modern2": "modern2.tex",
+                    "modern3": "modern3.tex",
+                    "jakes resume": "jakes1.tex",
+                }
+                template_file = fallback_map.get(style.lower().replace(" ", ""), "jakes1.tex")
+                new_latex = render_resume_template(template_file, data_dict)
+
+            # ── 2. Compile to PDF and upload ─────────────────────────────────
+            pdf_url, preview_url = await save_and_upload(
+                latex_code=new_latex,
+                user=user_obj,
+                resume_id=resume_id,
+            )
+
+            # ── 3. Persist new tex_source + pdf_url on the resume row ─────────
+            resume.tex_source = new_latex
+            resume.pdf_url = pdf_url
+            if preview_url:
+                resume.preview_url = preview_url
+
+            t_res = await session.execute(
+                select(Template).where(cast(Any, Template.name).ilike(style))
+            )
+            template_obj = t_res.scalar_one_or_none()
+            if template_obj:
+                resume.template_id = template_obj.id
+
+            resume.updated_at = datetime.now(UTC).replace(tzinfo=None)
+            session.add(resume)
+
+            await _set_status(
+                session,
+                job,
+                JobStatus.COMPLETED,
+                pdf_url=pdf_url,
+                completed_at=datetime.now(UTC).replace(tzinfo=None),
+            )
+
+        except Exception as exc:
+            tb = traceback.format_exc()
+            logger.error("Style-change job %s failed: %s", job_id, tb)
+            await _set_status(
+                session,
+                job,
+                JobStatus.FAILED,
+                error_message=str(exc)[:500],
+            )
+
+
+@router.post("/{resume_id}/change-style")
+@user_limiter.limit("5/minute")
+async def change_style(
+    resume_id: int,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    user: CurrentUser,
+    db: DB,
+    style: str = Form(...),
+):
+    """
+    Kick off an async style change for a resume.
+
+    Returns immediately with a ``job_id`` the client can use to open the SSE
+    stream at ``GET /resumes/jobs/{job_id}/updates``.
+    If the user already has a PENDING or RUNNING job for this resume, the
+    existing job_id is returned (rate-limit guard in addition to slowapi).
+    """
+    # Guard: don't allow more than one active job per resume
+    existing = await db.execute(
+        select(ResumeJob).where(
+            ResumeJob.resume_id == resume_id,
+            ResumeJob.user_id == user.id,
+            ResumeJob.status.in_([JobStatus.PENDING.value, JobStatus.RUNNING.value]),  # type: ignore
+        )
+    )
+    active_job = existing.scalar_one_or_none()
+    if active_job:
+        return {
+            "job_id": active_job.id,
+            "message": "A style change is already in progress for this resume.",
+            "status": active_job.status,
+        }
+
+    if user.id is None:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "User ID missing")
+
+    # Verify the resume belongs to this user
+    res = await db.execute(select(Resume).where(Resume.id == resume_id, Resume.user_id == user.id))
+    if not res.scalar_one_or_none():
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Resume not found")
+
+    # Create job entry
+    job = ResumeJob(
+        resume_id=resume_id,
+        user_id=user.id,
+        style=style,
+        status=JobStatus.PENDING.value,
+    )
+    db.add(job)
+    await db.commit()
+    await db.refresh(job)
+
+    if job.id is None:
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "Failed to create job ID")
+
+    # Publish initial pending status
+    await publish_job_update(job.id, {"status": JobStatus.PENDING.value, "resume_id": resume_id})
+
+    # Queue background task
+    background_tasks.add_task(_run_style_change, job.id, resume_id, style, user.id)
+
+    return {
+        "job_id": job.id,
+        "message": "Style change started. You will be notified when it is ready.",
+        "status": JobStatus.PENDING.value,
+    }
+
+
+@router.get("/jobs/{job_id}/updates")
+async def job_updates(job_id: int, request: Request, user: CurrentUser):
+    """
+    Server-Sent Events stream for a single style-change job.
+
+    Subscribes to the per-job Redis channel ``resume_job:{job_id}`` and
+    forwards every message to the client.  Closes automatically once a
+    COMPLETED or FAILED event is received, or when the client disconnects.
+    """
+
+    async def event_stream():
+        redis = await get_redis()
+        pubsub = redis.pubsub()
+        channel = f"resume_job:{job_id}"
+        await pubsub.subscribe(channel)
+        try:
+            while True:
+                if await request.is_disconnected():
+                    break
+                raw = await pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
+                if raw and raw["type"] == "message":
+                    data_str = raw["data"]
+                    yield f"data: {data_str}\n\n"
+                    # Auto-close on terminal states
+                    try:
+                        payload = json.loads(data_str)
+                        if payload.get("status") in (
+                            JobStatus.COMPLETED.value,
+                            JobStatus.FAILED.value,
+                        ):
+                            break
+                    except Exception:
+                        pass
+                await asyncio.sleep(0.1)
+        finally:
+            await pubsub.unsubscribe(channel)
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+@router.get("/jobs/{job_id}/status")
+async def get_job_status(job_id: int, user: CurrentUser, db: DB):
+    """Poll endpoint for clients that can't use SSE."""
+    result = await db.execute(
+        select(ResumeJob).where(ResumeJob.id == job_id, ResumeJob.user_id == user.id)
+    )
+    job = result.scalar_one_or_none()
+    if not job:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Job not found")
+    return {
+        "job_id": job.id,
+        "resume_id": job.resume_id,
+        "style": job.style,
+        "status": job.status,
+        "pdf_url": job.pdf_url,
+        "error_message": job.error_message,
+        "created_at": job.created_at,
+        "completed_at": job.completed_at,
+    }
+
+
+@router.post("/{resume_id}/sync-content")
+async def sync_content(resume_id: int, request: SyncContentRequest, user: CurrentUser, db: DB):
+    """
+    Parses modified LaTeX back into JSON content to preserve tweaks before style changes.
+    """
+    # Verify the resume belongs to this user
+    res = await db.execute(select(Resume).where(Resume.id == resume_id, Resume.user_id == user.id))
+    resume = res.scalar_one_or_none()
+    if not resume:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Resume not found")
+
+    try:
+        llm = await get_llm_client(db, user=user)
+        # Use parse_resume_prompt (verbatim extraction) instead of a weak "keep as written"
+        # instruction — the old prompt lost to the RewriteResume schema field descriptions
+        # which encouraged the LLM to add a profile summary, change bullets, etc.
+        structured_llm = llm.with_structured_output(RewriteResume)
+        messages = [
+            SystemMessage(content=parse_resume_prompt),
+            HumanMessage(content=request.latex_code),
+        ]
+        details = await structured_llm.ainvoke(messages)
+        if hasattr(details, "model_dump") and callable(getattr(details, "model_dump", None)):
+            resume.content = details.model_dump()  # type: ignore
+        elif isinstance(details, dict):
+            resume.content = details
+        resume.tex_source = request.latex_code
+        if request.pdf_url:
+            resume.pdf_url = request.pdf_url
+        resume.updated_at = datetime.now(UTC).replace(tzinfo=None)
+        db.add(resume)
+        await db.commit()
+        return {"success": True}
+    except Exception as e:
+        logger.error(f"Failed to sync content: {traceback.format_exc()}")
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, f"Failed to sync content: {e!s}")

@@ -40,10 +40,11 @@ export default function Ai({
 
     try {
       let accumulated = "";
+      setResumeState({ isStreamingLatex: true });
       await modifyResume(latexCode, instruction, provider, model, (ev) => {
         if (ev.event === "chunk" && ev.text) {
           accumulated += ev.text;
-          setResumeState({ latexCode: accumulated });
+          setResumeState({ latexCode: accumulated, isStreamingLatex: true });
         } else if (ev.event === "error" && ev.message) {
           setError(ev.message);
         }
@@ -53,6 +54,7 @@ export default function Ai({
       setError(err?.message || "An error occurred while modifying the resume.");
     } finally {
       setLoading(false);
+      setResumeState({ isStreamingLatex: false });
     }
   };
 

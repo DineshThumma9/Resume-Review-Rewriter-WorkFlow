@@ -89,10 +89,10 @@
   [% if details.profile_links.get('github') %]\href{[[ details.profile_links.get('github') | escape_latex ]]}{[[ details.profile_links.get('github') | escape_latex ]]}[% endif %] & [% if details.profile_links.get('phone') %]Mobile: [[ details.profile_links.get('phone') | escape_latex ]][% endif %] \\
 \end{tabular*}
 
-[% if details.profile_summary %]
+[% if profile_summary and profile_summary.profile_summary %]
 %-----------SUMMARY-----------
 \section{Summary}
-\small [[ details.profile_summary | escape_latex ]]
+\small [[ profile_summary.profile_summary | escape_latex ]]
 \vspace{-10pt}
 [% endif %]
 

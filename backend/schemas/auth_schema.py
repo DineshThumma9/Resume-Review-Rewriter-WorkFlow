@@ -4,8 +4,6 @@ auth_schema.py
 Schemas for authentication and user profile endpoints.
 """
 
-from typing import Optional
-
 from pydantic import BaseModel
 
 
@@ -28,12 +26,12 @@ class GoogleExchangeBody(BaseModel):
 class ProfileUpdate(BaseModel):
     name: str
     email: str
-    github: Optional[str] = None
-    linkedin: Optional[str] = None
-    website: Optional[str] = None
-    location: Optional[str] = None
-    phone: Optional[str] = None
-    raw_resume: Optional[str] = None
+    github: str | None = None
+    linkedin: str | None = None
+    website: str | None = None
+    location: str | None = None
+    phone: str | None = None
+    raw_resume: str | None = None
 
 
 class ProfileOut(BaseModel):
@@ -41,12 +39,12 @@ class ProfileOut(BaseModel):
     username: str
     name: str
     email: str
-    github: Optional[str] = None
-    linkedin: Optional[str] = None
-    website: Optional[str] = None
-    location: Optional[str] = None
-    phone: Optional[str] = None
-    raw_resume: Optional[str] = None
+    github: str | None = None
+    linkedin: str | None = None
+    website: str | None = None
+    location: str | None = None
+    phone: str | None = None
+    raw_resume: str | None = None
 
 
 class API_KEY_REQUEST(BaseModel):

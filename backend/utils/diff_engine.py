@@ -1,12 +1,11 @@
+import copy
 import re
 from difflib import SequenceMatcher
 
 
 def find_best_match(target: str, text: str) -> str:
     # Split original text into sentences/lines
-    lines = [
-        line.strip() for line in re.split(r"\n|•|-|\*", text) if len(line.strip()) > 10
-    ]
+    lines = [line.strip() for line in re.split(r"\n|•|-|\*", text) if len(line.strip()) > 10]
     best_match = ""
     best_ratio = 0.0
     for line in lines:
@@ -34,9 +33,7 @@ def compute_diff(old: str, new: str) -> str:
         if tag == "equal":
             result.append(" ".join(old_words[i1:i2]))
         elif tag == "replace":
-            result.append(
-                f"~~{' '.join(old_words[i1:i2])}~~ **{' '.join(new_words[j1:j2])}**"
-            )
+            result.append(f"~~{' '.join(old_words[i1:i2])}~~ **{' '.join(new_words[j1:j2])}**")
         elif tag == "delete":
             result.append(f"~~{' '.join(old_words[i1:i2])}~~")
         elif tag == "insert":
@@ -46,8 +43,6 @@ def compute_diff(old: str, new: str) -> str:
 
 
 def apply_diff_to_data(original_text: str, data: dict) -> dict:
-    import copy
-
     new_data = copy.deepcopy(data)
 
     # Process profile summary

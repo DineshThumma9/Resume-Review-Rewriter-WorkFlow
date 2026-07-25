@@ -1,9 +1,9 @@
-from typing import Any, Dict
+from typing import Any
 
 from schemas.schema import RewriteResume
 
 
-def map_llm_to_profile(parsed: Any) -> Dict[str, Any]:
+def map_llm_to_profile(parsed: Any) -> dict[str, Any]:
     if isinstance(parsed, dict):
         parsed = RewriteResume.model_validate(parsed)
 
@@ -45,9 +45,7 @@ def map_llm_to_profile(parsed: Any) -> Dict[str, Any]:
         exp_list = []
         for idx, exp in enumerate(parsed.experience):
             resp_str = (
-                "\n".join([f"- {r}" for r in exp.responsibilities])
-                if exp.responsibilities
-                else ""
+                "\n".join([f"- {r}" for r in exp.responsibilities]) if exp.responsibilities else ""
             )
             exp_list.append(
                 {
@@ -97,9 +95,10 @@ def map_llm_to_profile(parsed: Any) -> Dict[str, Any]:
             sections["skills"] = skills_list
 
     # Map Achievements
-    if parsed.achivements:
+    ach_source = getattr(parsed, "achievements", None) or getattr(parsed, "achivements", None)
+    if ach_source:
         ach_list = []
-        for idx, ach in enumerate(parsed.achivements):
+        for idx, ach in enumerate(ach_source):
             ach_list.append({"id": f"ach_{idx}", "title": ach, "description": ""})
         if ach_list:
             sections["achievements"] = ach_list

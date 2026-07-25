@@ -38,7 +38,7 @@ class Settings(BaseSettings):
     langchain_project: str = "resumereworker"
 
     model_config = SettingsConfigDict(
-        env_file=str(BASE_DIR / ".env"), env_file_encoding="utf-8", extra="ignore"
+        env_file=str(BASE_DIR / ".env.dev"), env_file_encoding="utf-8", extra="ignore"
     )
 
 

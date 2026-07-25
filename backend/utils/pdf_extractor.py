@@ -43,12 +43,10 @@ async def extract_resume_text_and_links(file: UploadFile) -> tuple[str, int]:
         if extracted_links:
             # Deduplicate while preserving order
             seen: set[str] = set()
-            unique_links = [
-                u for u in extracted_links if not (u in seen or seen.add(u))
-            ]
+            unique_links = [u for u in extracted_links if not (u in seen or seen.add(u))]
             resume_text += "\n\n[HYPERLINKS FOUND IN RESUME — use these to fill profile_links and project links]\n"
             resume_text += "\n".join(unique_links)
 
         return resume_text, page_count
     except Exception as e:
-        raise ValueError(f"Failed to read PDF: {str(e)}")
+        raise ValueError(f"Failed to read PDF: {e!s}")

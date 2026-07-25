@@ -98,10 +98,10 @@
     \vspace{-8pt}
 \end{center}
 
-[% if details.profile_summary %]
+[% if profile_summary and profile_summary.profile_summary %]
 %-----------SUMMARY-----------
 \section{Summary}
-\small [[ details.profile_summary | escape_latex ]]
+\small [[ profile_summary.profile_summary | escape_latex ]]
 \vspace{-10pt}
 [% endif %]
 

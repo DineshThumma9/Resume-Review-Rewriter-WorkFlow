@@ -1,11 +1,10 @@
 import logging
 import secrets
-from typing import Annotated, Any, Dict
+from typing import Any
 
 from fastapi import (
     APIRouter,
     Cookie,
-    Depends,
     File,
     HTTPException,
     Request,
@@ -13,11 +12,10 @@ from fastapi import (
     status,
 )
 from fastapi.responses import RedirectResponse, Response
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 
 from core.config import settings
-from core.database import get_session
+from core.database import DB
 from core.rate_limit import limiter
 from core.security import (
     create_access_token,
@@ -42,16 +40,12 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
-DB = Annotated[AsyncSession, Depends(get_session)]
-
 
 @router.post("/signup", status_code=status.HTTP_201_CREATED)
 @limiter.limit("5/minute")
 async def signup(request: Request, response: Response, body: SignupBody, db: DB):
     existing = await db.execute(
-        select(User).where(
-            (User.email == body.email) | (User.username == body.username)
-        )
+        select(User).where((User.email == body.email) | (User.username == body.username))
     )
     if existing.scalar_one_or_none():
         raise HTTPException(status.HTTP_409_CONFLICT, "Email or username already taken")
@@ -66,7 +60,11 @@ async def signup(request: Request, response: Response, body: SignupBody, db: DB)
     await db.flush()
     await db.refresh(user)
 
-    access_token = create_access_token(user.id)
+    access_token = create_access_token(user.id) if user.id is not None else ""
+    if not access_token:
+        raise HTTPException(
+            status.HTTP_500_INTERNAL_SERVER_ERROR, "Failed to generate access token"
+        )
     response.set_cookie(
         key="access_token",
         value=access_token,
@@ -83,13 +81,12 @@ async def signup(request: Request, response: Response, body: SignupBody, db: DB)
 async def login(request: Request, response: Response, body: LoginBody, db: DB):
     result = await db.execute(
         select(User).where(
-            (User.email == body.email_or_username)
-            | (User.username == body.email_or_username)
+            (User.email == body.email_or_username) | (User.username == body.email_or_username)
         )
     )
     user = result.scalar_one_or_none()
 
-    if not user or not verify_password(body.password, user.hashed_password):
+    if not user or not verify_password(body.password, user.hashed_password) or user.id is None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid email or password")
 
     access_token = create_access_token(user.id)
@@ -152,9 +149,7 @@ async def google_callback(
     try:
         profile = await exchange_google_code(code)
     except Exception:
-        raise HTTPException(
-            status.HTTP_400_BAD_REQUEST, "Failed to exchange Google code"
-        )
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Failed to exchange Google code")
 
     result = await db.execute(select(User).where(User.email == profile["email"]))
     user = result.scalar_one_or_none()
@@ -189,15 +184,11 @@ async def google_callback(
 
 @router.post("/google/exchange")
 @limiter.limit("5/minute")
-async def exchange_google(
-    request: Request, response: Response, body: GoogleExchangeBody, db: DB
-):
+async def exchange_google(request: Request, response: Response, body: GoogleExchangeBody, db: DB):
     result = await db.execute(select(OAuthCode).where(OAuthCode.code == body.code))
     oauth_code = result.scalar_one_or_none()
     if not oauth_code:
-        raise HTTPException(
-            status.HTTP_400_BAD_REQUEST, "Invalid or expired authorization code"
-        )
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid or expired authorization code")
 
     # Check expiration (e.g. 1 minute)
     age = (naive_utcnow() - oauth_code.created_at).total_seconds()
@@ -247,7 +238,7 @@ async def update_profile(body: ProfileUpdate, user: CurrentUser, db: DB):
     return user
 
 
-@router.post("/profile/autofill", response_model=Dict[str, Any])
+@router.post("/profile/autofill", response_model=dict[str, Any])
 async def autofill_profile(
     user: CurrentUser,
     db: DB,
@@ -272,5 +263,5 @@ async def autofill_profile(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to parse resume details: {str(e)}",
+            detail=f"Failed to parse resume details: {e!s}",
         )

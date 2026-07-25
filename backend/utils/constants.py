@@ -1,12 +1,13 @@
 DUMMY_RESUME_DATA = {
     "details": {
         "name": "Alex Applicant",
-        "profile_summary": "Resourceful and driven software engineer with 5+ years of experience developing robust web applications and scalable backend systems. Proven ability to lead teams and deliver high-quality solutions on time.",
+        "profile_summary": "Resourceful Senior Software Engineer with 6+ years of experience designing high-throughput distributed systems, cloud microservices, and modern web applications. Specialized in performance optimization, automated CI/CD pipelines, and technical leadership.",
         "profile_links": {
             "phone": "+1 (555) 123-4567",
             "email": "alex.applicant@example.com",
-            "linkedin": "linkedin.com/in/alexapplicant",
-            "github": "github.com/alexapplicant",
+            "linkedin": "https://linkedin.com/in/alexapplicant",
+            "github": "https://github.com/alexapplicant",
+            "portfolio": "https://alexapplicant.dev",
             "location": "San Francisco, CA",
         },
     },
@@ -14,8 +15,9 @@ DUMMY_RESUME_DATA = {
         {
             "institution": "University of Technology",
             "year": "2016 - 2020",
-            "gpa": "3.9/4.0",
-            "course": "B.S. in Computer Science",
+            "gpa": "3.9 / 4.0",
+            "course": "B.S. in Computer Science & Engineering",
+            "location": "San Francisco, CA",
         }
     ],
     "experience": [
@@ -23,47 +25,89 @@ DUMMY_RESUME_DATA = {
             "company": "Tech Innovations Inc.",
             "role": "Senior Backend Engineer",
             "duration": "Jan 2022 - Present",
+            "location": "San Francisco, CA",
             "responsibilities": [
-                "Architected and deployed microservices using FastAPI and Docker, improving system scalability by 40%.",
-                "Optimized PostgreSQL queries, reducing average API response times from 800ms to 200ms.",
-                "Mentored 3 junior developers and established CI/CD pipelines using GitHub Actions.",
+                "Architected and deployed event-driven microservices using FastAPI, Redis Pub/Sub, and Docker, improving system throughput by 45%.",
+                "Optimized PostgreSQL database indexes and query plans, reducing average 99th-percentile API response latency from 800ms to 120ms.",
+                "Mentored 4 junior developers, spearheaded code review standards, and automated deployment pipelines via GitHub Actions.",
             ],
         },
         {
             "company": "Web Solutions LLC",
-            "role": "Full Stack Developer",
+            "role": "Full Stack Engineer",
             "duration": "Jun 2020 - Dec 2021",
+            "location": "San Jose, CA",
             "responsibilities": [
-                "Developed responsive front-end interfaces using React and Tailwind CSS.",
-                "Integrated third-party payment gateways like Stripe for secure transactions.",
-                "Collaborated with product managers to define and execute quarterly roadmaps.",
+                "Engineered responsive single-page web applications using React, TypeScript, and Tailwind CSS, increasing mobile user conversion by 30%.",
+                "Integrated secure REST API endpoints with Stripe payment processing, handling $2M+ in monthly transaction volume.",
+                "Collaborated cross-functionally with UI/UX designers and product managers to execute quarterly feature roadmaps.",
             ],
         },
     ],
     "technical_skills": [
         {
             "category": "Languages",
-            "skills": ["Python", "TypeScript", "JavaScript", "SQL", "Go"],
+            "skills": [
+                "Python",
+                "TypeScript",
+                "JavaScript",
+                "SQL",
+                "Go",
+                "C++",
+                "HTML/CSS",
+            ],
         },
         {
-            "category": "Frameworks",
-            "skills": ["FastAPI", "React", "Node.js", "Express", "Next.js"],
+            "category": "Frameworks & Libraries",
+            "skills": [
+                "FastAPI",
+                "React.js",
+                "Next.js",
+                "Node.js",
+                "Express",
+                "Tailwind CSS",
+            ],
         },
         {
-            "category": "Tools",
-            "skills": ["Docker", "Kubernetes", "AWS", "Git", "PostgreSQL", "Redis"],
+            "category": "Infrastructure & Tools",
+            "skills": [
+                "Docker",
+                "Kubernetes",
+                "AWS (EC2, S3)",
+                "Git",
+                "PostgreSQL",
+                "Redis",
+                "CI/CD",
+            ],
         },
     ],
     "projects": [
         {
             "name": "E-Commerce Platform Redesign",
-            "description": "A high-performance e-commerce platform built from the ground up.",
+            "date": "2023",
             "technologies": ["React", "Node.js", "MongoDB", "Redis"],
             "highlights": [
-                "Implemented real-time inventory tracking using WebSockets.",
-                "Increased user retention by 25% through an improved checkout flow.",
+                "Implemented real-time inventory tracking and dynamic cart synchronization using WebSockets, reducing abandoned carts by 20%.",
+                "Optimized asset loading and client bundle size, elevating Google Lighthouse performance score from 62 to 98.",
             ],
-        }
+        },
+        {
+            "name": "AI Resume Reworker Platform",
+            "date": "2024",
+            "technologies": ["FastAPI", "LangChain", "Python", "Docker"],
+            "highlights": [
+                "Built an automated ATS optimization pipeline leveraging LLM structured output and Docker-based pdflatex compilation.",
+                "Designed an asynchronous Redis queue architecture for real-time SSE job notifications and live feedback streaming.",
+            ],
+        },
+    ],
+    "certifications": [
+        "AWS Certified Solutions Architect – Associate (2023)",
+        "Certified Kubernetes Application Developer (CKAD - 2024)",
+    ],
+    "achivements": [
+        "1st Place Winner – Annual University Hackathon (out of 120+ competing teams)",
+        "Published technical article on High-Performance Python Microservices (50k+ reads)",
     ],
 }
 

@@ -15,8 +15,8 @@ PDF_FILE="$WORKDIR/resume.pdf"
 cat > "$TEX_FILE"
 
 # Run pdflatex twice (second pass resolves references/TOC)
-pdflatex -interaction=nonstopmode -halt-on-error -output-directory "$WORKDIR" "$TEX_FILE" >/dev/null 2>&1 || \
-pdflatex -interaction=nonstopmode -output-directory "$WORKDIR" "$TEX_FILE" >/dev/null 2>&1 || true
+pdflatex -interaction=nonstopmode -halt-on-error -output-directory "$WORKDIR" "$TEX_FILE" > /dev/null 2>&1 || \
+pdflatex -interaction=nonstopmode -output-directory "$WORKDIR" "$TEX_FILE" > /dev/null 2>&1 || true
 
 if [ ! -f "$PDF_FILE" ]; then
     # Re-run and capture stderr for the error message
