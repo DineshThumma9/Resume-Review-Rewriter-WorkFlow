@@ -31,6 +31,12 @@ def optimize_projects_for_rendering(data: dict) -> dict:
     # Create a deep copy to avoid modifying original caller data/DB objects
     data_copy = copy.deepcopy(data)
 
+    # Ensure both 'achievements' and 'achivements' exist in data dictionary for templates
+    achievements = data_copy.get("achievements") if data_copy.get("achievements") is not None else data_copy.get("achivements")
+    if achievements is not None:
+        data_copy["achievements"] = achievements
+        data_copy["achivements"] = achievements
+
     projects = data_copy.get("projects")
     if not projects or not isinstance(projects, list):
         return data_copy

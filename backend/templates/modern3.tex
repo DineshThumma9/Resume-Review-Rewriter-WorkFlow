@@ -212,11 +212,11 @@
 \vspace{-15pt}
 [% endif %]
 
-[% if achivements %]
+[% if achievements or achivements %]
 %-----------ACHIEVEMENTS-----------
 \section{Achievements}
   \resumeSubHeadingListStart
-    [% for item in achivements %]
+    [% for item in (achievements or achivements) %]
     \resumeSubItem{[[ item | escape_latex ]]}
     [% endfor %]
   \resumeSubHeadingListEnd
