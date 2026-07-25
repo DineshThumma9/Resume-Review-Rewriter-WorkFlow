@@ -10,17 +10,18 @@ import os
 from collections.abc import AsyncGenerator
 from typing import Annotated, Any, cast
 
-from core.config import settings
 from dotenv import load_dotenv
 from fastapi import Depends
+from sqlalchemy import text, update
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlmodel import SQLModel, select
+
+from core.config import settings
 from models.models import (  # noqa: F401 – ensures table is registered
     Resume,
     ResumeJob,
     Template,
 )
-from sqlalchemy import text, update
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlmodel import SQLModel, select
 
 logger = logging.getLogger(__name__)
 
@@ -168,9 +169,7 @@ async def create_tables() -> None:
     for col in ["github", "linkedin", "website", "location", "phone", "raw_resume"]:
         try:
             async with engine.begin() as conn:
-                await conn.execute(
-                    text(f"ALTER TABLE users ADD COLUMN IF NOT EXISTS {col} TEXT")
-                )
+                await conn.execute(text(f"ALTER TABLE users ADD COLUMN IF NOT EXISTS {col} TEXT"))
         except Exception as e:
             logger.warning(f"Could not add column {col} to users table: {e}")
 
@@ -178,9 +177,7 @@ async def create_tables() -> None:
     try:
         async with engine.begin() as conn:
             await conn.execute(
-                text(
-                    "ALTER TABLE resumes DROP CONSTRAINT IF EXISTS resumes_template_id_fkey"
-                )
+                text("ALTER TABLE resumes DROP CONSTRAINT IF EXISTS resumes_template_id_fkey")
             )
             await conn.execute(
                 text(
@@ -188,9 +185,7 @@ async def create_tables() -> None:
                 )
             )
     except Exception as e:
-        logger.warning(
-            f"Could not update resumes template_id foreign key constraint: {e}"
-        )
+        logger.warning(f"Could not update resumes template_id foreign key constraint: {e}")
 
     # Seed builtin templates
     async with AsyncSessionLocal() as session:

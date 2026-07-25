@@ -241,9 +241,6 @@ def mask_latex(latex_code: str, resume_content: dict, mask_details: MaskDetails)
     return latex_code
 
 
-
-
-
 async def autofill_resume_profile(resume_text: str, user: User, db: AsyncSession) -> dict[str, Any]:
     """
     Parse a resume's raw text into a structured profile dictionary using the LLM.
