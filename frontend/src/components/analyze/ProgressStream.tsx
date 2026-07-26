@@ -16,6 +16,7 @@ import {
   RotateCcw,
   Gauge,
   Scale,
+  Clock,
 } from "lucide-react";
 
 // ── Preprocess Markdown ────────────────────────────────────────────────────────
@@ -241,13 +242,13 @@ export function ProgressStream({
   }, [logs]);
 
   useEffect(() => {
-    if (running && !analysis) {
+    if (running) {
       const timer = setInterval(() => {
         setElapsedSeconds((prev) => prev + 1);
       }, 1000);
       return () => clearInterval(timer);
     }
-  }, [running, analysis]);
+  }, [running]);
 
   useEffect(() => {
     if (running && !analysis) {
@@ -346,9 +347,9 @@ export function ProgressStream({
   return (
     <div className="w-full flex flex-col gap-6 pb-28 px-4 md:px-8 animate-in fade-in duration-300">
       {/* ── Top Section: Pipeline Progress Stepper (Visible during & after execution) ── */}
-      <div className="flex flex-col gap-3 p-4 rounded-2xl border border-border/80 bg-card/60 backdrop-blur-xs shadow-xs mt-2">
+      <div className="flex flex-col gap-3 p-4 rounded-2xl bg-transparent mt-2">
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2.5">
             <div className="w-8 h-8 rounded-full bg-primary/10 border border-primary/30 flex items-center justify-center">
               <Sparkles size={16} className="text-primary animate-pulse" />
             </div>
@@ -364,16 +365,34 @@ export function ProgressStream({
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            {running && (
-              <span className="text-[10px] font-mono font-semibold px-2.5 py-1 rounded-full bg-primary/10 text-primary border border-primary/20 animate-pulse">
-                {String(Math.floor(elapsedSeconds / 60)).padStart(2, "0")}:
-                {String(elapsedSeconds % 60).padStart(2, "0")}s
-              </span>
+          <div className="flex items-center gap-2.5">
+            {/* Solid Active Sidebar-Style Primary Timer */}
+            {(running || elapsedSeconds > 0) && (
+              <div
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono font-bold text-white bg-primary shadow-sm transition-all duration-300 ${
+                  running ? "animate-pulse ring-2 ring-primary/40" : ""
+                }`}
+              >
+                <Clock
+                  size={14}
+                  className={`shrink-0 text-white ${running ? "animate-spin" : ""}`}
+                />
+                <span className="tracking-wide text-white">
+                  {String(Math.floor(elapsedSeconds / 60)).padStart(2, "0")}:
+                  {String(elapsedSeconds % 60).padStart(2, "0")}s
+                </span>
+                {running ? (
+                  <span className="w-2 h-2 rounded-full bg-white animate-ping ml-0.5" />
+                ) : (
+                  <span className="text-[10px] font-sans font-medium text-white/80 ml-0.5">
+                    total
+                  </span>
+                )}
+              </div>
             )}
             <button
               onClick={() => setShowConsole(!showConsole)}
-              className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors px-2.5 py-1 rounded-lg border border-border bg-background"
+              className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors px-2.5 py-1 rounded-lg border border-border/60 bg-transparent hover:bg-muted/30"
             >
               <FileText size={12} />
               <span>{showConsole ? "Hide Logs" : "Console Logs"}</span>

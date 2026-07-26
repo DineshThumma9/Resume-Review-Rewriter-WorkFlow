@@ -1,6 +1,7 @@
 import copy
 import os
 import re
+from typing import Any
 
 from jinja2 import Environment, FileSystemLoader
 
@@ -32,10 +33,94 @@ def optimize_projects_for_rendering(data: dict) -> dict:
     data_copy = copy.deepcopy(data)
 
     # Ensure both 'achievements' and 'achivements' exist in data dictionary for templates
-    achievements = data_copy.get("achievements") if data_copy.get("achievements") is not None else data_copy.get("achivements")
+    achievements = (
+        data_copy.get("achievements")
+        if data_copy.get("achievements") is not None
+        else data_copy.get("achivements")
+    )
     if achievements is not None:
         data_copy["achievements"] = achievements
         data_copy["achivements"] = achievements
+
+    # Normalize details.profile_links into a dictionary for Jinja template access
+    details = data_copy.get("details")
+    if isinstance(details, dict):
+        profile_links = details.get("profile_links")
+        links_dict: dict[str, Any] = {}
+        if isinstance(profile_links, dict):
+            links_dict = copy.deepcopy(profile_links)
+        elif isinstance(profile_links, list):
+            for link_item in profile_links:
+                if (
+                    isinstance(link_item, dict)
+                    and link_item.get("platform")
+                    and link_item.get("url")
+                ):
+                    key = str(link_item["platform"]).lower().strip()
+                    links_dict[key] = link_item["url"]
+
+        for field in [
+            "phone",
+            "email",
+            "github",
+            "linkedin",
+            "website",
+            "leetcode",
+            "portfolio",
+            "codeforces",
+        ]:
+            val = details.get(field)
+            if val and field not in links_dict:
+                links_dict[field] = val
+
+        details["profile_links"] = links_dict
+
+        # Build dynamic non-empty header_rows (left links & right contact info)
+        left_items = []
+        link_keys_order = ["github", "linkedin", "leetcode", "portfolio", "website", "codeforces"]
+        labels = {
+            "github": "GitHub",
+            "linkedin": "LinkedIn",
+            "leetcode": "LeetCode",
+            "portfolio": "Portfolio",
+            "website": "Website",
+            "codeforces": "Codeforces",
+        }
+        for key in link_keys_order:
+            url = links_dict.get(key)
+            if url:
+                display = (
+                    str(url)
+                    .replace("https://", "")
+                    .replace("http://", "")
+                    .replace("www.", "")
+                    .rstrip("/")
+                )
+                left_items.append(
+                    {
+                        "key": key,
+                        "label": labels.get(key, key.capitalize()),
+                        "url": str(url),
+                        "display": display,
+                    }
+                )
+        details["left_links"] = left_items
+
+        right_items = []
+        if links_dict.get("phone"):
+            right_items.append(f"Mobile: {links_dict['phone']}")
+        if details.get("location") or links_dict.get("location"):
+            loc = details.get("location") or links_dict.get("location")
+            right_items.append(f"Location: {loc}")
+
+        max_rows = max(len(left_items), len(right_items))
+        header_rows = []
+        for i in range(max_rows):
+            l_item = left_items[i] if i < len(left_items) else None
+            r_item = right_items[i] if i < len(right_items) else None
+            header_rows.append({"left": l_item, "right": r_item})
+
+        details["header_rows"] = header_rows
 
     projects = data_copy.get("projects")
     if not projects or not isinstance(projects, list):

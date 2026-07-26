@@ -86,8 +86,17 @@
 %----------HEADING-----------------
 \begin{tabular*}{\textwidth}{l@{\extracolsep{\fill}}r}
   \textbf{\Large [[ details.name | escape_latex ]]} & [% if details.profile_links.get('email') %]Email: \href{mailto:[[ details.profile_links.get('email') | escape_latex ]]}{[[ details.profile_links.get('email') | escape_latex ]]}[% endif %] \\
-  [% if details.profile_links.get('github') %]\href{[[ details.profile_links.get('github') | escape_latex ]]}{[[ details.profile_links.get('github') | escape_latex ]]}[% endif %] & [% if details.profile_links.get('phone') %]Mobile: [[ details.profile_links.get('phone') | escape_latex ]][% endif %] \\
+  [% if details.header_rows %]
+  [% for row in details.header_rows %]
+  [% if row.left %][[ row.left.label ]]: \href{[[ row.left.url | escape_latex ]]}{\underline{[[ row.left.display | escape_latex ]]}}[% endif %] & [% if row.right %][[ row.right | escape_latex ]][% endif %] \\
+  [% endfor %]
+  [% else %]
+  [% if details.profile_links.get('github') %]GitHub: \href{[[ details.profile_links.get('github') | escape_latex ]]}{\underline{[[ details.profile_links.get('github') | replace('https://', '') | replace('http://', '') | replace('www.', '') | escape_latex ]]}}[% endif %] & [% if details.profile_links.get('phone') %]Mobile: [[ details.profile_links.get('phone') | escape_latex ]][% endif %] \\
+  [% if details.profile_links.get('linkedin') %]LinkedIn: \href{[[ details.profile_links.get('linkedin') | escape_latex ]]}{\underline{[[ details.profile_links.get('linkedin') | replace('https://', '') | replace('http://', '') | replace('www.', '') | escape_latex ]]}}[% endif %] & [% if details.profile_links.get('location') %]Location: [[ details.profile_links.get('location') | escape_latex ]][% endif %] \\
+  [% if details.profile_links.get('leetcode') %]LeetCode: \href{[[ details.profile_links.get('leetcode') | escape_latex ]]}{\underline{[[ details.profile_links.get('leetcode') | replace('https://', '') | replace('http://', '') | replace('www.', '') | escape_latex ]]}}[% endif %] & \\
+  [% endif %]
 \end{tabular*}
+\vspace{-10pt}
 
 [% if profile_summary and profile_summary.profile_summary %]
 %-----------SUMMARY-----------
